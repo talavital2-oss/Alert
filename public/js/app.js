@@ -67,7 +67,13 @@
     card.dataset.alertId = alert.id;
 
     const time = new Date(alert.timestamp);
-    const timeStr = time.toLocaleTimeString('he-IL');
+    // Show exact time with seconds in HH:MM:SS format
+    const timeStr = time.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const dateStr = time.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    const areaHtml = alert.area ? `<span class="alert-card-area">${alert.area}</span>` : '';
+    const countdownText = alert.countdown === 0 ? 'מיידי' :
+      `${alert.countdown} שניות`;
 
     card.innerHTML = `
       <div class="alert-card-header">
@@ -76,15 +82,17 @@
           ${AlertMap.alertLabels[alert.type] || alert.type}
         </span>
       </div>
-      <div class="alert-card-city-en">${alert.cityEn}</div>
-      <div class="alert-card-countdown">⏱ ${alert.countdown} שניות למיגון</div>
-      <div class="alert-card-time">${timeStr}</div>
+      ${areaHtml}
+      <div class="alert-card-meta">
+        <span class="alert-card-countdown">${countdownText}</span>
+        <span class="alert-card-time">${timeStr}</span>
+      </div>
     `;
 
-    // Click to zoom to location
+    // Click to center map on location (no zoom change)
     card.addEventListener('click', () => {
       if (alert.lat && alert.lng) {
-        AlertMap.fitToAlerts([alert]);
+        AlertMap.panTo(alert.lat, alert.lng);
       }
     });
 
@@ -123,9 +131,6 @@
     // Add to panel
     addToPanel(alerts);
 
-    // Zoom to alerts
-    AlertMap.fitToAlerts(alerts);
-
     // Play sound for highest priority alert type
     const hasMissiles = alerts.some(a => a.type === 'missiles');
     SoundManager.play(hasMissiles ? 'missiles' : alerts[0].type);
@@ -162,7 +167,6 @@
       for (const alert of currentAlerts) {
         AlertMap.addAlert(alert);
       }
-      AlertMap.fitToAlerts(currentAlerts);
     }
     updateAlertCounts();
   }

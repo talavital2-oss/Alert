@@ -6,46 +6,9 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Load local city data as fallback
-let cities = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'cities.json'), 'utf8'));
-
-// Try to load comprehensive city data from tzevaadom on startup
-function loadTzevaadomCities() {
-  return new Promise((resolve) => {
-    const req = https.get('https://www.tzevaadom.co.il/static/cities.json', (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try {
-          const tzCities = JSON.parse(data);
-          // Merge: tzevaadom data takes priority, our local data fills gaps
-          const merged = { ...cities };
-          for (const [name, info] of Object.entries(tzCities)) {
-            if (!merged[name] || !merged[name].lat) {
-              merged[name] = {
-                lat: info.lat,
-                lng: info.lng,
-                en: info.en || name,
-                countdown: info.countdown || 90
-              };
-            }
-          }
-          cities = merged;
-          console.log(`Loaded ${Object.keys(cities).length} cities (merged with tzevaadom data)`);
-          resolve();
-        } catch (e) {
-          console.log('Failed to parse tzevaadom cities, using local data');
-          resolve();
-        }
-      });
-    });
-    req.on('error', () => {
-      console.log('Failed to fetch tzevaadom cities, using local data');
-      resolve();
-    });
-    req.setTimeout(5000, () => { req.destroy(); resolve(); });
-  });
-}
+// Load comprehensive city data (1449 cities from tzevaadom)
+const cities = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'cities.json'), 'utf8'));
+console.log(`Loaded ${Object.keys(cities).length} cities`);
 
 // Alert state (for persistent server mode / SSE)
 let currentAlerts = [];
@@ -156,6 +119,7 @@ function processTzevaadomAlerts(entries) {
       const alertCities = alert.cities || [];
       const alertType = threatToType(alert.threat);
       const title = threatToTitle(alert.threat);
+      // Use exact epoch timestamp from tzevaadom (seconds -> ms)
       const timestamp = alert.time ? new Date(alert.time * 1000).toISOString() : new Date().toISOString();
 
       for (const cityName of alertCities) {
@@ -167,6 +131,8 @@ function processTzevaadomAlerts(entries) {
           lat: cityData ? cityData.lat : null,
           lng: cityData ? cityData.lng : null,
           countdown: cityData ? cityData.countdown : 90,
+          area: cityData ? (cityData.areaHe || '') : '',
+          areaEn: cityData ? (cityData.areaEn || '') : '',
           type: alertType,
           title: title,
           desc: '',
@@ -269,6 +235,8 @@ function fetchOrefAlerts() {
                 lat: cityData ? cityData.lat : null,
                 lng: cityData ? cityData.lng : null,
                 countdown: cityData ? cityData.countdown : 90,
+                area: cityData ? (cityData.areaHe || '') : '',
+                areaEn: cityData ? (cityData.areaEn || '') : '',
                 type: alertType,
                 title: alert.title || '',
                 desc: alert.desc || '',
@@ -413,6 +381,8 @@ function fetchOrefForSSE() {
               lat: cityData ? cityData.lat : null,
               lng: cityData ? cityData.lng : null,
               countdown: cityData ? cityData.countdown : 90,
+              area: cityData ? (cityData.areaHe || '') : '',
+              areaEn: cityData ? (cityData.areaEn || '') : '',
               type: alertType,
               title: alert.title || '',
               desc: alert.desc || '',
@@ -462,10 +432,7 @@ function categorizeAlert(cat) {
 }
 
 // Start server
-async function start() {
-  // Load comprehensive city data
-  await loadTzevaadomCities();
-
+function start() {
   // Start polling for SSE mode (persistent server)
   console.log('Starting alert polling (every 2 seconds)...');
   setInterval(fetchAlerts, 2000);

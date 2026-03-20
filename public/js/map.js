@@ -87,16 +87,19 @@ const AlertMap = (function () {
     const marker = L.marker([alert.lat, alert.lng], { icon: pulseIcon }).addTo(map);
 
     // Popup content
-    const timeStr = new Date(alert.timestamp).toLocaleTimeString('he-IL');
+    const time = new Date(alert.timestamp);
+    const timeStr = time.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const countdownText = alert.countdown === 0 ? 'מיידי' : `${alert.countdown} שניות`;
+    const areaHtml = alert.area ? `<div class="popup-area">${alert.area}</div>` : '';
     const popupHtml = `
       <div class="popup-content">
         <div class="popup-city">${alert.city}</div>
-        <div class="popup-city-en">${alert.cityEn}</div>
+        ${areaHtml}
         <div class="popup-type popup-type-${alert.type}">
           ${alertLabels[alert.type] || alert.type}
         </div>
-        <div class="popup-countdown">${alert.countdown}s</div>
-        <div class="popup-countdown-label">זמן למיגון / Time to shelter</div>
+        <div class="popup-countdown">${countdownText}</div>
+        <div class="popup-countdown-label">זמן למיגון</div>
         <div class="popup-time">${timeStr}</div>
       </div>
     `;
@@ -154,5 +157,9 @@ const AlertMap = (function () {
     return markers.size;
   }
 
-  return { init, addAlert, removeMarker, clearAll, fitToAlerts, getActiveCount, alertLabels, alertLabelsEn };
+  function panTo(lat, lng) {
+    map.panTo([lat, lng], { animate: true });
+  }
+
+  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, alertLabels, alertLabelsEn };
 })();
