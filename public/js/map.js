@@ -88,7 +88,7 @@ const AlertMap = (function () {
 
     // Popup content
     const time = new Date(alert.timestamp);
-    const timeStr = time.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const timeStr = time.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jerusalem' });
     const countdownText = alert.countdown === 0 ? 'מיידי' : `${alert.countdown} שניות`;
     const areaHtml = alert.area ? `<div class="popup-area">${alert.area}</div>` : '';
     const popupHtml = `

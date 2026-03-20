@@ -1,5 +1,7 @@
 // Main app initialization
 (function () {
+  const ISR_TZ = 'Asia/Jerusalem';
+
   // DOM elements
   const connectionStatus = document.getElementById('connection-status');
   const statusText = connectionStatus.querySelector('.status-text');
@@ -13,7 +15,8 @@
   const panelToggle = document.getElementById('panel-toggle');
   const alertPanel = document.getElementById('alert-panel');
 
-  let alertHistory = [];
+  let eventHistory = []; // array of event objects
+  let knownEventIds = new Set(); // track event IDs to prevent duplicates
 
   // Initialize map
   AlertMap.init();
@@ -23,14 +26,12 @@
     alertPanel.classList.toggle('panel-closed');
     alertPanel.classList.toggle('panel-open');
 
-    // Adjust map size when panel toggles
     const mapEl = document.getElementById('map');
     if (alertPanel.classList.contains('panel-closed')) {
       mapEl.style.right = '0';
     } else {
       mapEl.style.right = window.innerWidth <= 768 ? '0' : 'var(--panel-width)';
     }
-    // Trigger Leaflet resize
     setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
   });
 
@@ -42,13 +43,31 @@
     soundToggle.classList.toggle('active', enabled);
   });
 
-  // Update connection status UI
+  // Format time in Israel timezone (always Israel, regardless of user's location)
+  function formatTimeISR(isoOrMs) {
+    const d = typeof isoOrMs === 'number' ? new Date(isoOrMs) : new Date(isoOrMs);
+    return d.toLocaleTimeString('he-IL', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      timeZone: ISR_TZ
+    });
+  }
+
+  // Format relative time in Hebrew
+  function formatRelativeTime(ms) {
+    const diffMin = Math.round((Date.now() - ms) / 60000);
+    if (diffMin < 1) return 'עכשיו';
+    if (diffMin === 1) return 'לפני דקה';
+    if (diffMin < 60) return `לפני ${diffMin} דקות`;
+    const hours = Math.floor(diffMin / 60);
+    if (hours === 1) return 'לפני שעה';
+    return `לפני ${hours} שעות`;
+  }
+
   function setConnectionStatus(status) {
     connectionStatus.className = `status-dot ${status}`;
     statusText.textContent = status === 'connected' ? 'מחובר' : 'מתחבר...';
   }
 
-  // Update alert count displays
   function updateAlertCounts() {
     const activeCount = AlertMap.getActiveCount();
     if (activeCount > 0) {
@@ -57,86 +76,99 @@
     } else {
       alertCountBadge.classList.add('hidden');
     }
-    panelAlertCount.textContent = `${alertHistory.length} התרעות`;
+    // Count total cities across all events
+    const totalCities = eventHistory.reduce((sum, ev) => sum + ev.cityCount, 0);
+    panelAlertCount.textContent = `${totalCities} התרעות`;
   }
 
-  // Create alert card for panel
-  function createAlertCard(alert) {
+  // Create event card for panel (grouped - like the real app)
+  function createEventCard(event) {
     const card = document.createElement('div');
     card.className = 'alert-card active';
-    card.dataset.alertId = alert.id;
+    card.dataset.eventId = event.eventId;
 
-    const time = new Date(alert.timestamp);
-    // Show exact time with seconds in HH:MM:SS format
-    const timeStr = time.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const dateStr = time.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeRange = event.minTime === event.maxTime
+      ? formatTimeISR(event.minTime)
+      : `${formatTimeISR(event.minTime)}-${formatTimeISR(event.maxTime)}`;
 
-    const areaHtml = alert.area ? `<span class="alert-card-area">${alert.area}</span>` : '';
-    const countdownText = alert.countdown === 0 ? 'מיידי' :
-      `${alert.countdown} שניות`;
+    const relTime = formatRelativeTime(event.maxTime);
+    const areasStr = event.areas.length > 0 ? event.areas.join(', ') : '';
+
+    // List city names (Hebrew)
+    const cityNames = event.cities.map(c => c.city).join(', ');
 
     card.innerHTML = `
       <div class="alert-card-header">
-        <span class="alert-card-city">${alert.city}</span>
-        <span class="alert-card-type type-${alert.type}">
-          ${AlertMap.alertLabels[alert.type] || alert.type}
+        <span class="alert-card-type type-${event.type}">
+          ${AlertMap.alertLabels[event.type] || event.type}
         </span>
+        <span class="alert-card-reltime">${relTime} (${timeRange})</span>
       </div>
-      ${areaHtml}
+      ${areasStr ? `<div class="alert-card-areas">${areasStr}</div>` : ''}
+      <div class="alert-card-cities">${cityNames}</div>
       <div class="alert-card-meta">
-        <span class="alert-card-countdown">${countdownText}</span>
-        <span class="alert-card-time">${timeStr}</span>
+        <span class="alert-card-count">${event.cityCount} יישובים</span>
       </div>
     `;
 
-    // Click to center map on location (no zoom change)
-    card.addEventListener('click', () => {
-      if (alert.lat && alert.lng) {
-        AlertMap.panTo(alert.lat, alert.lng);
-      }
-    });
-
-    // Remove active state after 30 seconds
-    setTimeout(() => card.classList.remove('active'), 30000);
+    // Remove active state after 60 seconds
+    setTimeout(() => card.classList.remove('active'), 60000);
 
     return card;
   }
 
-  // Add alerts to panel
-  function addToPanel(alerts) {
-    noAlerts.style.display = 'none';
-
-    for (const alert of alerts) {
-      alertHistory.unshift(alert);
-      const card = createAlertCard(alert);
-      alertList.insertBefore(card, alertList.firstChild);
+  // Rebuild the entire panel from eventHistory (sorted newest first)
+  function renderPanel() {
+    alertList.innerHTML = '';
+    if (eventHistory.length === 0) {
+      noAlerts.style.display = '';
+    } else {
+      noAlerts.style.display = 'none';
+      for (const event of eventHistory) {
+        const card = createEventCard(event);
+        alertList.appendChild(card);
+      }
     }
-
-    // Trim old entries from panel (keep 200)
-    while (alertList.children.length > 200) {
-      alertList.removeChild(alertList.lastChild);
-    }
-    alertHistory = alertHistory.slice(0, 200);
-
     updateAlertCounts();
   }
 
-  // Handle new alerts
-  function handleAlerts(alerts) {
-    // Add markers to map
-    for (const alert of alerts) {
-      AlertMap.addAlert(alert);
+  // Add new events to panel (inserts at top, maintains sort)
+  function addEvents(events) {
+    for (const event of events) {
+      if (knownEventIds.has(event.eventId)) continue;
+      knownEventIds.add(event.eventId);
+      eventHistory.unshift(event);
+    }
+    // Keep max 100 events
+    if (eventHistory.length > 100) {
+      eventHistory = eventHistory.slice(0, 100);
+    }
+    // Re-sort newest first
+    eventHistory.sort((a, b) => b.maxTime - a.maxTime);
+    renderPanel();
+  }
+
+  // Handle new alerts from polling
+  function handleAlerts(alerts, events) {
+    // Add markers to map for each city
+    if (alerts && alerts.length > 0) {
+      for (const alert of alerts) {
+        AlertMap.addAlert(alert);
+      }
     }
 
-    // Add to panel
-    addToPanel(alerts);
+    // Add grouped events to panel
+    if (events && events.length > 0) {
+      addEvents(events);
 
-    // Play sound for highest priority alert type
-    const hasMissiles = alerts.some(a => a.type === 'missiles');
-    SoundManager.play(hasMissiles ? 'missiles' : alerts[0].type);
+      // Play sound for highest priority alert type
+      const hasMissiles = events.some(e => e.type === 'missiles');
+      SoundManager.play(hasMissiles ? 'missiles' : events[0].type);
 
-    // Flash page title
-    flashTitle(alerts.length);
+      // Flash page title
+      const totalCities = events.reduce((sum, e) => sum + e.cityCount, 0);
+      flashTitle(totalCities);
+    }
 
     updateAlertCounts();
   }
@@ -158,10 +190,10 @@
     }, 10000);
   }
 
-  // Handle init (restore state)
-  function handleInit(currentAlerts, history) {
-    if (history && history.length > 0) {
-      addToPanel(history);
+  // Handle init (history load)
+  function handleInit(currentAlerts, events) {
+    if (events && events.length > 0) {
+      addEvents(events);
     }
     if (currentAlerts && currentAlerts.length > 0) {
       for (const alert of currentAlerts) {
@@ -176,6 +208,23 @@
     AlertMap.clearAll();
     updateAlertCounts();
   }
+
+  // Update relative times every 30 seconds
+  setInterval(() => {
+    const cards = alertList.querySelectorAll('.alert-card');
+    cards.forEach((card, i) => {
+      if (i < eventHistory.length) {
+        const relTimeEl = card.querySelector('.alert-card-reltime');
+        if (relTimeEl) {
+          const event = eventHistory[i];
+          const timeRange = event.minTime === event.maxTime
+            ? formatTimeISR(event.minTime)
+            : `${formatTimeISR(event.minTime)}-${formatTimeISR(event.maxTime)}`;
+          relTimeEl.textContent = `${formatRelativeTime(event.maxTime)} (${timeRange})`;
+        }
+      }
+    });
+  }, 30000);
 
   // Initialize alert service
   AlertService.init({

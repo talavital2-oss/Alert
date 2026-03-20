@@ -110,7 +110,7 @@ function threatToTitle(threat) {
   }
 }
 
-// Process tzevaadom alert entries into our format
+// Process tzevaadom alert entries into per-city alerts (for map markers)
 function processTzevaadomAlerts(entries) {
   const processed = [];
   for (const entry of entries) {
@@ -119,13 +119,14 @@ function processTzevaadomAlerts(entries) {
       const alertCities = alert.cities || [];
       const alertType = threatToType(alert.threat);
       const title = threatToTitle(alert.threat);
-      // Use exact epoch timestamp from tzevaadom (seconds -> ms)
-      const timestamp = alert.time ? new Date(alert.time * 1000).toISOString() : new Date().toISOString();
+      const timeMs = alert.time ? alert.time * 1000 : Date.now();
+      const timestamp = new Date(timeMs).toISOString();
 
       for (const cityName of alertCities) {
         const cityData = cities[cityName];
         processed.push({
           id: `${entry.id}-${cityName}`,
+          eventId: entry.id,
           city: cityName,
           cityEn: cityData ? cityData.en : cityName,
           lat: cityData ? cityData.lat : null,
@@ -137,6 +138,7 @@ function processTzevaadomAlerts(entries) {
           title: title,
           desc: '',
           isDrill: alert.isDrill || false,
+          timeMs,
           timestamp
         });
       }
@@ -145,14 +147,66 @@ function processTzevaadomAlerts(entries) {
   return processed;
 }
 
+// Group per-city alerts into events (for history panel)
+// Returns array sorted newest-first, each with areas, cities, time range
+function groupAlertsIntoEvents(perCityAlerts) {
+  // Group by eventId
+  const eventMap = new Map();
+  for (const alert of perCityAlerts) {
+    const eid = alert.eventId;
+    if (!eventMap.has(eid)) {
+      eventMap.set(eid, {
+        eventId: eid,
+        type: alert.type,
+        title: alert.title,
+        cities: [],
+        areas: new Set(),
+        minTime: alert.timeMs,
+        maxTime: alert.timeMs,
+        isDrill: alert.isDrill
+      });
+    }
+    const ev = eventMap.get(eid);
+    ev.cities.push({
+      city: alert.city,
+      cityEn: alert.cityEn,
+      lat: alert.lat,
+      lng: alert.lng,
+      countdown: alert.countdown,
+      timeMs: alert.timeMs,
+      id: alert.id
+    });
+    if (alert.area) ev.areas.add(alert.area);
+    if (alert.timeMs < ev.minTime) ev.minTime = alert.timeMs;
+    if (alert.timeMs > ev.maxTime) ev.maxTime = alert.timeMs;
+  }
+
+  // Convert to sorted array (newest first by maxTime)
+  const events = Array.from(eventMap.values()).map(ev => ({
+    eventId: ev.eventId,
+    type: ev.type,
+    title: ev.title,
+    areas: Array.from(ev.areas),
+    cities: ev.cities.sort((a, b) => a.timeMs - b.timeMs),
+    cityCount: ev.cities.length,
+    minTime: ev.minTime,
+    maxTime: ev.maxTime,
+    minTimestamp: new Date(ev.minTime).toISOString(),
+    maxTimestamp: new Date(ev.maxTime).toISOString(),
+    isDrill: ev.isDrill
+  }));
+
+  events.sort((a, b) => b.maxTime - a.maxTime);
+  return events;
+}
+
 // Current active alerts via tzevaadom (NOT geo-blocked)
 app.get('/api/alerts/current', async (req, res) => {
   try {
-    // tzevaadom alerts-history returns recent alerts (last few minutes)
     const data = await fetchJson('https://api.tzevaadom.co.il/alerts-history');
 
     if (!Array.isArray(data) || data.length === 0) {
-      return res.json({ alerts: [], timestamp: new Date().toISOString() });
+      return res.json({ alerts: [], events: [], timestamp: new Date().toISOString() });
     }
 
     // Only include alerts from the last 5 minutes as "current"
@@ -162,32 +216,34 @@ app.get('/api/alerts/current', async (req, res) => {
       return alerts.some(a => a.time && (a.time * 1000) > fiveMinAgo);
     });
 
-    const processed = processTzevaadomAlerts(recent);
-    res.json({ alerts: processed, timestamp: new Date().toISOString() });
+    const perCity = processTzevaadomAlerts(recent);
+    const events = groupAlertsIntoEvents(perCity);
+    res.json({ alerts: perCity, events, timestamp: new Date().toISOString() });
   } catch (e) {
-    // Fallback: try oref directly (works if server is in Israel)
     try {
       const orefData = await fetchOrefAlerts();
-      res.json({ alerts: orefData, timestamp: new Date().toISOString() });
+      res.json({ alerts: orefData, events: [], timestamp: new Date().toISOString() });
     } catch (e2) {
-      res.json({ alerts: [], timestamp: new Date().toISOString(), error: 'both_sources_failed' });
+      res.json({ alerts: [], events: [], timestamp: new Date().toISOString(), error: 'both_sources_failed' });
     }
   }
 });
 
 // Alert history via tzevaadom (NOT geo-blocked)
+// Returns grouped events sorted newest-first
 app.get('/api/alerts/history-proxy', async (req, res) => {
   try {
     const data = await fetchJson('https://api.tzevaadom.co.il/alerts-history');
 
     if (!Array.isArray(data) || data.length === 0) {
-      return res.json([]);
+      return res.json({ events: [], alerts: [] });
     }
 
-    const processed = processTzevaadomAlerts(data);
-    res.json(processed);
+    const perCity = processTzevaadomAlerts(data);
+    const events = groupAlertsIntoEvents(perCity);
+    res.json({ events, alerts: perCity });
   } catch (e) {
-    res.json([]);
+    res.json({ events: [], alerts: [] });
   }
 });
 

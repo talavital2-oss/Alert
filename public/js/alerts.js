@@ -3,13 +3,11 @@ const AlertService = (function () {
   let eventSource = null;
   let pollInterval = null;
   let cities = {};
-  const processedIds = new Set();
-  const MAX_PROCESSED = 5000;
   let useSSE = false;
   let sseConnected = false;
   let historyLoaded = false;
 
-  // Callbacks
+  // Callbacks: onAlert(alerts, events), onClear(), onConnectionChange(status), onInit(alerts, events)
   let onAlert = null;
   let onClear = null;
   let onConnectionChange = null;
@@ -25,32 +23,22 @@ const AlertService = (function () {
     }
   }
 
-  // Load alert history from oref history proxy
+  // Load alert history
   async function loadHistory() {
     if (historyLoaded) return;
     try {
       const res = await fetch('/api/alerts/history-proxy');
       if (res.ok) {
-        const history = await res.json();
-        if (history && history.length > 0) {
+        const data = await res.json();
+        const events = data.events || [];
+        const alerts = data.alerts || [];
+        if (events.length > 0 || alerts.length > 0) {
           historyLoaded = true;
-          if (onInit) onInit([], history);
+          if (onInit) onInit(alerts, events);
         }
       }
     } catch (e) {
-      console.log('History proxy unavailable, trying local history...');
-      try {
-        const res = await fetch('/api/alerts/history');
-        if (res.ok) {
-          const history = await res.json();
-          if (history && history.length > 0) {
-            historyLoaded = true;
-            if (onInit) onInit([], history);
-          }
-        }
-      } catch (e2) {
-        // Both history sources failed, continue without history
-      }
+      console.log('History proxy unavailable');
     }
   }
 
@@ -63,7 +51,6 @@ const AlertService = (function () {
     eventSource = new EventSource('/api/alerts/sse');
     let sseTimeout = null;
 
-    // If SSE doesn't connect within 5 seconds, give up and rely on polling
     sseTimeout = setTimeout(() => {
       if (!sseConnected) {
         console.log('SSE connection timeout, using polling mode');
@@ -77,7 +64,7 @@ const AlertService = (function () {
       useSSE = true;
       clearTimeout(sseTimeout);
       if (onConnectionChange) onConnectionChange('connected');
-      console.log('SSE connected - using SSE mode');
+      console.log('SSE connected');
     };
 
     eventSource.onmessage = (event) => {
@@ -87,11 +74,11 @@ const AlertService = (function () {
         switch (data.type) {
           case 'init':
             historyLoaded = true;
-            if (onInit) onInit(data.alerts, data.history);
+            if (onInit) onInit(data.alerts || [], data.events || data.history || []);
             break;
 
           case 'alert':
-            handleNewAlerts(data.alerts);
+            if (onAlert) onAlert(data.alerts || [], data.events || []);
             break;
 
           case 'clear':
@@ -106,11 +93,9 @@ const AlertService = (function () {
     eventSource.onerror = () => {
       sseConnected = false;
       useSSE = false;
-      // Don't show disconnected if polling is working
       if (!pollInterval) {
         if (onConnectionChange) onConnectionChange('disconnected');
       }
-      // Close SSE and let polling handle it
       if (eventSource) {
         eventSource.close();
         eventSource = null;
@@ -122,7 +107,7 @@ const AlertService = (function () {
 
   // Poll /api/alerts/current every 2 seconds
   function startPolling() {
-    let lastAlertIds = '';
+    let lastEventIds = '';
     let consecutiveErrors = 0;
     let pollConnected = false;
 
@@ -134,7 +119,6 @@ const AlertService = (function () {
         const data = await res.json();
         consecutiveErrors = 0;
 
-        // Mark as connected on first successful poll
         if (!pollConnected) {
           pollConnected = true;
           if (!sseConnected) {
@@ -142,16 +126,18 @@ const AlertService = (function () {
           }
         }
 
-        if (data.alerts && data.alerts.length > 0) {
-          // Check if alerts changed
-          const alertIds = data.alerts.map(a => a.id).sort().join(',');
-          if (alertIds !== lastAlertIds) {
-            lastAlertIds = alertIds;
-            handleNewAlerts(data.alerts);
+        const events = data.events || [];
+        const alerts = data.alerts || [];
+
+        if (events.length > 0) {
+          const eventIds = events.map(e => e.eventId).sort().join(',');
+          if (eventIds !== lastEventIds) {
+            lastEventIds = eventIds;
+            if (onAlert) onAlert(alerts, events);
           }
         } else {
-          if (lastAlertIds !== '') {
-            lastAlertIds = '';
+          if (lastEventIds !== '') {
+            lastEventIds = '';
             if (onClear) onClear();
           }
         }
@@ -166,33 +152,8 @@ const AlertService = (function () {
       }
     }
 
-    // Poll immediately, then every 2 seconds
     poll();
     pollInterval = setInterval(poll, 2000);
-  }
-
-  function handleNewAlerts(alerts) {
-    if (!alerts || alerts.length === 0) return;
-
-    const newAlerts = [];
-    for (const alert of alerts) {
-      if (processedIds.has(alert.id)) continue;
-      processedIds.add(alert.id);
-
-      // Clean up old IDs to prevent memory leak
-      if (processedIds.size > MAX_PROCESSED) {
-        const idsArray = Array.from(processedIds);
-        for (let i = 0; i < 1000; i++) {
-          processedIds.delete(idsArray[i]);
-        }
-      }
-
-      newAlerts.push(alert);
-    }
-
-    if (newAlerts.length > 0 && onAlert) {
-      onAlert(newAlerts);
-    }
   }
 
   function disconnect() {
