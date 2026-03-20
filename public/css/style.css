@@ -314,6 +314,11 @@ html, body {
   border-color: var(--text-dim);
 }
 
+.alert-card.selected {
+  border-color: var(--text-primary);
+  background: var(--bg-card-hover);
+}
+
 .alert-card.active {
   border-color: var(--red-alert);
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);

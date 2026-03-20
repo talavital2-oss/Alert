@@ -114,6 +114,16 @@
     // Remove active state after 60 seconds
     setTimeout(() => card.classList.remove('active'), 60000);
 
+    // Click to show event cities on map
+    card.addEventListener('click', () => {
+      const shown = AlertMap.showHistoryEvent(event);
+      // Toggle selected state on cards
+      alertList.querySelectorAll('.alert-card').forEach(c => c.classList.remove('selected'));
+      if (shown) {
+        card.classList.add('selected');
+      }
+    });
+
     return card;
   }
 

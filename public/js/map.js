@@ -137,5 +137,74 @@ const AlertMap = (function () {
     map.panTo([lat, lng], { animate: true });
   }
 
-  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, alertLabels, alertLabelsEn };
+  // === History event preview (click on panel card) ===
+  let historyMarkers = []; // array of L.circleMarker
+  let activeHistoryEventId = null;
+
+  function clearHistoryMarkers() {
+    for (const m of historyMarkers) {
+      map.removeLayer(m);
+    }
+    historyMarkers = [];
+    activeHistoryEventId = null;
+  }
+
+  // Show markers for a history event's cities, fit map to them
+  // Returns the eventId shown, or null if toggled off
+  function showHistoryEvent(event) {
+    // Toggle off if clicking the same event
+    if (activeHistoryEventId === event.eventId) {
+      clearHistoryMarkers();
+      return null;
+    }
+
+    clearHistoryMarkers();
+    activeHistoryEventId = event.eventId;
+
+    const color = alertColors[event.type] || alertColors.general;
+    const validCities = event.cities.filter(c => c.lat && c.lng);
+
+    for (const city of validCities) {
+      const timeStr = new Date(city.timeMs).toLocaleTimeString('he-IL', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        timeZone: 'Asia/Jerusalem'
+      });
+      const countdownText = city.countdown === 0 ? 'מיידי' : `${city.countdown} שניות`;
+
+      const m = L.circleMarker([city.lat, city.lng], {
+        radius: 7,
+        color: color,
+        fillColor: color,
+        fillOpacity: 0.85,
+        weight: 2,
+        opacity: 0.9
+      }).addTo(map);
+
+      m.bindPopup(`
+        <div class="popup-content">
+          <div class="popup-city">${city.city}</div>
+          <div class="popup-type popup-type-${event.type}">
+            ${alertLabels[event.type] || event.type}
+          </div>
+          <div class="popup-countdown">${countdownText}</div>
+          <div class="popup-countdown-label">זמן למיגון</div>
+          <div class="popup-time">${timeStr}</div>
+        </div>
+      `, { className: 'alert-popup', maxWidth: 250 });
+
+      historyMarkers.push(m);
+    }
+
+    // Fit map to the event's cities
+    if (validCities.length === 1) {
+      map.setView([validCities[0].lat, validCities[0].lng], 12, { animate: true });
+    } else if (validCities.length > 1) {
+      const bounds = L.latLngBounds(validCities.map(c => [c.lat, c.lng]));
+      map.fitBounds(bounds.pad(0.3), { animate: true, maxZoom: 12 });
+    }
+
+    return event.eventId;
+  }
+
+  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn };
 })();
