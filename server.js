@@ -57,6 +57,146 @@ app.get('/api/alerts/history', (req, res) => {
   res.json(alertHistory);
 });
 
+// Stateless proxy endpoint - fetches from oref API per request
+// Works on serverless platforms (Vercel) where SSE/polling aren't persistent
+app.get('/api/alerts/current', (req, res) => {
+  const options = {
+    hostname: 'www.oref.org.il',
+    path: '/WarningMessages/alert/alerts.json',
+    method: 'GET',
+    headers: {
+      'Referer': 'https://www.oref.org.il/',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Client': 'true',
+      'Accept': 'application/json',
+      'Accept-Language': 'he-IL,he;q=0.9',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    },
+    timeout: 4000
+  };
+
+  const proxyReq = https.request(options, (proxyRes) => {
+    let data = '';
+    proxyRes.on('data', (chunk) => { data += chunk; });
+    proxyRes.on('end', () => {
+      try {
+        data = data.replace(/^\uFEFF/, '').trim();
+        if (!data || data === '[]' || data === '') {
+          return res.json({ alerts: [], timestamp: new Date().toISOString() });
+        }
+
+        const alerts = JSON.parse(data);
+        if (!Array.isArray(alerts) || alerts.length === 0) {
+          return res.json({ alerts: [], timestamp: new Date().toISOString() });
+        }
+
+        const timestamp = new Date().toISOString();
+        const processedAlerts = [];
+
+        for (const alert of alerts) {
+          const alertCities = alert.data || alert.cities || [];
+          const alertType = categorizeAlert(alert.cat || alert.type || '');
+
+          for (const cityName of alertCities) {
+            const cityData = cities[cityName];
+            processedAlerts.push({
+              id: `${alert.id || Date.now()}-${cityName}`,
+              city: cityName,
+              cityEn: cityData ? cityData.en : cityName,
+              lat: cityData ? cityData.lat : null,
+              lng: cityData ? cityData.lng : null,
+              countdown: cityData ? cityData.countdown : 90,
+              type: alertType,
+              title: alert.title || '',
+              desc: alert.desc || '',
+              timestamp
+            });
+          }
+        }
+
+        res.json({ alerts: processedAlerts, timestamp });
+      } catch (e) {
+        res.json({ alerts: [], timestamp: new Date().toISOString(), error: 'parse_error' });
+      }
+    });
+  });
+
+  proxyReq.on('error', () => {
+    res.json({ alerts: [], timestamp: new Date().toISOString(), error: 'fetch_error' });
+  });
+
+  proxyReq.on('timeout', () => {
+    proxyReq.destroy();
+    res.json({ alerts: [], timestamp: new Date().toISOString(), error: 'timeout' });
+  });
+
+  proxyReq.end();
+});
+
+// Proxy to oref history endpoint
+app.get('/api/alerts/history-proxy', (req, res) => {
+  const options = {
+    hostname: 'www.oref.org.il',
+    path: '/WarningMessages/alert/History/AlertsHistory.json',
+    method: 'GET',
+    headers: {
+      'Referer': 'https://www.oref.org.il/',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Client': 'true',
+      'Accept': 'application/json',
+      'Accept-Language': 'he-IL,he;q=0.9',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    },
+    timeout: 5000
+  };
+
+  const proxyReq = https.request(options, (proxyRes) => {
+    let data = '';
+    proxyRes.on('data', (chunk) => { data += chunk; });
+    proxyRes.on('end', () => {
+      try {
+        data = data.replace(/^\uFEFF/, '').trim();
+        if (!data) return res.json([]);
+
+        const rawHistory = JSON.parse(data);
+        if (!Array.isArray(rawHistory)) return res.json([]);
+
+        // Process history entries
+        const processed = [];
+        for (const entry of rawHistory.slice(0, 50)) {
+          const alertCities = typeof entry.data === 'string' ? entry.data.split(',').map(s => s.trim()) : (entry.data || []);
+          const alertType = categorizeAlert(entry.cat || entry.category || '');
+          const timestamp = entry.alertDate || entry.date || new Date().toISOString();
+
+          for (const cityName of alertCities) {
+            const cityData = cities[cityName];
+            processed.push({
+              id: `hist-${entry.rid || Date.now()}-${cityName}`,
+              city: cityName,
+              cityEn: cityData ? cityData.en : cityName,
+              lat: cityData ? cityData.lat : null,
+              lng: cityData ? cityData.lng : null,
+              countdown: cityData ? cityData.countdown : 90,
+              type: alertType,
+              title: entry.title || '',
+              desc: entry.desc || '',
+              timestamp
+            });
+          }
+        }
+
+        res.json(processed);
+      } catch (e) {
+        res.json([]);
+      }
+    });
+  });
+
+  proxyReq.on('error', () => res.json([]));
+  proxyReq.on('timeout', () => { proxyReq.destroy(); res.json([]); });
+  proxyReq.end();
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', clients: sseClients.size, uptime: process.uptime() });

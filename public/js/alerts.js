@@ -1,10 +1,13 @@
-// Alert module - SSE connection and alert processing
+// Alert module - polling-based with SSE upgrade
 const AlertService = (function () {
   let eventSource = null;
-  let reconnectAttempts = 0;
+  let pollInterval = null;
   let cities = {};
   const processedIds = new Set();
   const MAX_PROCESSED = 5000;
+  let useSSE = false;
+  let sseConnected = false;
+  let historyLoaded = false;
 
   // Callbacks
   let onAlert = null;
@@ -22,17 +25,59 @@ const AlertService = (function () {
     }
   }
 
-  function connect() {
+  // Load alert history from oref history proxy
+  async function loadHistory() {
+    if (historyLoaded) return;
+    try {
+      const res = await fetch('/api/alerts/history-proxy');
+      if (res.ok) {
+        const history = await res.json();
+        if (history && history.length > 0) {
+          historyLoaded = true;
+          if (onInit) onInit([], history);
+        }
+      }
+    } catch (e) {
+      console.log('History proxy unavailable, trying local history...');
+      try {
+        const res = await fetch('/api/alerts/history');
+        if (res.ok) {
+          const history = await res.json();
+          if (history && history.length > 0) {
+            historyLoaded = true;
+            if (onInit) onInit([], history);
+          }
+        }
+      } catch (e2) {
+        // Both history sources failed, continue without history
+      }
+    }
+  }
+
+  // Try SSE connection (works on persistent servers, fails on serverless)
+  function trySSE() {
     if (eventSource) {
       eventSource.close();
     }
 
     eventSource = new EventSource('/api/alerts/sse');
+    let sseTimeout = null;
+
+    // If SSE doesn't connect within 5 seconds, give up and rely on polling
+    sseTimeout = setTimeout(() => {
+      if (!sseConnected) {
+        console.log('SSE connection timeout, using polling mode');
+        eventSource.close();
+        eventSource = null;
+      }
+    }, 5000);
 
     eventSource.onopen = () => {
-      reconnectAttempts = 0;
+      sseConnected = true;
+      useSSE = true;
+      clearTimeout(sseTimeout);
       if (onConnectionChange) onConnectionChange('connected');
-      console.log('SSE connected');
+      console.log('SSE connected - using SSE mode');
     };
 
     eventSource.onmessage = (event) => {
@@ -41,6 +86,7 @@ const AlertService = (function () {
 
         switch (data.type) {
           case 'init':
+            historyLoaded = true;
             if (onInit) onInit(data.alerts, data.history);
             break;
 
@@ -58,16 +104,71 @@ const AlertService = (function () {
     };
 
     eventSource.onerror = () => {
-      if (onConnectionChange) onConnectionChange('disconnected');
-
-      // EventSource auto-reconnects, but we track attempts
-      reconnectAttempts++;
-      if (reconnectAttempts > 10) {
-        console.log('Too many reconnection attempts, backing off...');
-        eventSource.close();
-        setTimeout(connect, 5000);
+      sseConnected = false;
+      useSSE = false;
+      // Don't show disconnected if polling is working
+      if (!pollInterval) {
+        if (onConnectionChange) onConnectionChange('disconnected');
       }
+      // Close SSE and let polling handle it
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      clearTimeout(sseTimeout);
+      console.log('SSE failed, polling mode active');
     };
+  }
+
+  // Poll /api/alerts/current every 2 seconds
+  function startPolling() {
+    let lastAlertIds = '';
+    let consecutiveErrors = 0;
+    let pollConnected = false;
+
+    async function poll() {
+      try {
+        const res = await fetch('/api/alerts/current');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
+        consecutiveErrors = 0;
+
+        // Mark as connected on first successful poll
+        if (!pollConnected) {
+          pollConnected = true;
+          if (!sseConnected) {
+            if (onConnectionChange) onConnectionChange('connected');
+          }
+        }
+
+        if (data.alerts && data.alerts.length > 0) {
+          // Check if alerts changed
+          const alertIds = data.alerts.map(a => a.id).sort().join(',');
+          if (alertIds !== lastAlertIds) {
+            lastAlertIds = alertIds;
+            handleNewAlerts(data.alerts);
+          }
+        } else {
+          if (lastAlertIds !== '') {
+            lastAlertIds = '';
+            if (onClear) onClear();
+          }
+        }
+      } catch (e) {
+        consecutiveErrors++;
+        if (consecutiveErrors > 5 && pollConnected) {
+          pollConnected = false;
+          if (!sseConnected) {
+            if (onConnectionChange) onConnectionChange('disconnected');
+          }
+        }
+      }
+    }
+
+    // Poll immediately, then every 2 seconds
+    poll();
+    pollInterval = setInterval(poll, 2000);
   }
 
   function handleNewAlerts(alerts) {
@@ -75,7 +176,6 @@ const AlertService = (function () {
 
     const newAlerts = [];
     for (const alert of alerts) {
-      // Deduplicate
       if (processedIds.has(alert.id)) continue;
       processedIds.add(alert.id);
 
@@ -100,6 +200,10 @@ const AlertService = (function () {
       eventSource.close();
       eventSource = null;
     }
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
   }
 
   return {
@@ -110,7 +214,15 @@ const AlertService = (function () {
       onInit = callbacks.onInit;
 
       await loadCities();
-      connect();
+
+      // Start polling immediately (works everywhere)
+      startPolling();
+
+      // Load history from oref
+      loadHistory();
+
+      // Try SSE as an upgrade (works on persistent servers)
+      trySSE();
     },
 
     disconnect,
