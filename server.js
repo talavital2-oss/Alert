@@ -201,24 +201,41 @@ function groupAlertsIntoEvents(perCityAlerts) {
 }
 
 // Current active alerts via tzevaadom (NOT geo-blocked)
+// Fetches both real-time /alerts AND /alerts-history to never miss alerts
 app.get('/api/alerts/current', async (req, res) => {
   try {
-    const data = await fetchJson('https://api.tzevaadom.co.il/alerts-history');
+    // Fetch both real-time and history in parallel
+    const [liveResult, historyResult] = await Promise.allSettled([
+      fetchJson('https://api.tzevaadom.co.il/alerts', 3000),
+      fetchJson('https://api.tzevaadom.co.il/alerts-history', 5000)
+    ]);
 
-    if (!Array.isArray(data) || data.length === 0) {
-      return res.json({ alerts: [], events: [], timestamp: new Date().toISOString() });
+    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+    const seenEventIds = new Set();
+    let allPerCity = [];
+
+    // Process real-time alerts first (most current)
+    if (liveResult.status === 'fulfilled' && Array.isArray(liveResult.value) && liveResult.value.length > 0) {
+      const livePerCity = processTzevaadomAlerts(liveResult.value);
+      for (const a of livePerCity) {
+        seenEventIds.add(a.eventId);
+      }
+      allPerCity = livePerCity;
     }
 
-    // Only include alerts from the last 5 minutes as "current"
-    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
-    const recent = data.filter(entry => {
-      const alerts = entry.alerts || [];
-      return alerts.some(a => a.time && (a.time * 1000) > fiveMinAgo);
-    });
+    // Merge recent history alerts (dedup by eventId)
+    if (historyResult.status === 'fulfilled' && Array.isArray(historyResult.value) && historyResult.value.length > 0) {
+      const recent = historyResult.value.filter(entry => {
+        if (seenEventIds.has(entry.id)) return false;
+        const alerts = entry.alerts || [];
+        return alerts.some(a => a.time && (a.time * 1000) > fiveMinAgo);
+      });
+      const histPerCity = processTzevaadomAlerts(recent);
+      allPerCity = [...allPerCity, ...histPerCity];
+    }
 
-    const perCity = processTzevaadomAlerts(recent);
-    const events = groupAlertsIntoEvents(perCity);
-    res.json({ alerts: perCity, events, timestamp: new Date().toISOString() });
+    const events = groupAlertsIntoEvents(allPerCity);
+    res.json({ alerts: allPerCity, events, timestamp: new Date().toISOString() });
   } catch (e) {
     try {
       const orefData = await fetchOrefAlerts();

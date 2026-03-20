@@ -255,6 +255,25 @@ html, body {
   }
 }
 
+/* City name tooltip on map markers */
+.city-tooltip {
+  background: rgba(10, 14, 23, 0.85);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #e5e7eb;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  direction: rtl;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.city-tooltip::before {
+  border-top-color: rgba(239, 68, 68, 0.4) !important;
+}
+
 /* Popup styling */
 .alert-popup .leaflet-popup-content-wrapper {
   background: var(--bg-panel);

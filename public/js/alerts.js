@@ -112,6 +112,7 @@ const AlertService = (function () {
     let lastEventIds = '';
     let consecutiveErrors = 0;
     let pollConnected = false;
+    let forceNext = false;
 
     async function poll() {
       try {
@@ -133,13 +134,15 @@ const AlertService = (function () {
 
         if (events.length > 0) {
           const eventIds = events.map(e => e.eventId).sort().join(',');
-          if (eventIds !== lastEventIds) {
+          if (eventIds !== lastEventIds || forceNext) {
             lastEventIds = eventIds;
+            forceNext = false;
             if (onAlert) onAlert(alerts, events);
           }
         } else {
-          if (lastEventIds !== '') {
+          if (lastEventIds !== '' || forceNext) {
             lastEventIds = '';
+            forceNext = false;
             if (onClear) onClear();
           }
         }
@@ -153,6 +156,17 @@ const AlertService = (function () {
         }
       }
     }
+
+    // When tab becomes visible again, force an immediate poll
+    // Browsers throttle setInterval to ~1/min for background tabs,
+    // so alerts can be missed while the tab is hidden
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        console.log('Tab visible again, forcing poll');
+        forceNext = true;
+        poll();
+      }
+    });
 
     poll();
     pollInterval = setInterval(poll, 2000);

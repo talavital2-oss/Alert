@@ -86,6 +86,14 @@ const AlertMap = (function () {
 
     const marker = L.marker([alert.lat, alert.lng], { icon: pulseIcon }).addTo(map);
 
+    // Permanent Hebrew city name label on the map
+    marker.bindTooltip(alert.city, {
+      permanent: true,
+      direction: 'top',
+      offset: [0, -12],
+      className: 'city-tooltip'
+    });
+
     // Popup content
     const time = new Date(alert.timestamp);
     const timeStr = time.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jerusalem' });
