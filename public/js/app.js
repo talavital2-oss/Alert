@@ -157,9 +157,14 @@
       }
     }
 
-    // Add grouped events to panel
+    // Add grouped events to panel + compute direction arrows
     if (events && events.length > 0) {
       addEvents(events);
+
+      // Update missile direction arrows for relevant events
+      for (const event of events) {
+        AlertMap.updateDirection(event);
+      }
 
       // Play sound for highest priority alert type
       const hasMissiles = events.some(e => e.type === 'missiles');
