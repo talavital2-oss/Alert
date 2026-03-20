@@ -218,7 +218,7 @@ const AlertService = (function () {
       // Start polling immediately (works everywhere)
       startPolling();
 
-      // Load history from oref
+      // Load alert history from tzevaadom
       loadHistory();
 
       // Try SSE as an upgrade (works on persistent servers)
