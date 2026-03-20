@@ -190,15 +190,11 @@
     }, 10000);
   }
 
-  // Handle init (history load)
+  // Handle init (history load) - only populate panel, NOT the map
+  // Map markers come from polling /api/alerts/current only
   function handleInit(currentAlerts, events) {
     if (events && events.length > 0) {
       addEvents(events);
-    }
-    if (currentAlerts && currentAlerts.length > 0) {
-      for (const alert of currentAlerts) {
-        AlertMap.addAlert(alert);
-      }
     }
     updateAlertCounts();
   }

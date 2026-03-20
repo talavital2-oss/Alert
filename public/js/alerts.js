@@ -54,8 +54,10 @@ const AlertService = (function () {
     sseTimeout = setTimeout(() => {
       if (!sseConnected) {
         console.log('SSE connection timeout, using polling mode');
-        eventSource.close();
-        eventSource = null;
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
       }
     }, 5000);
 

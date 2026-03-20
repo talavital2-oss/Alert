@@ -241,9 +241,9 @@ app.get('/api/alerts/history-proxy', async (req, res) => {
 
     const perCity = processTzevaadomAlerts(data);
     const events = groupAlertsIntoEvents(perCity);
-    res.json({ events, alerts: perCity });
+    res.json({ events });
   } catch (e) {
-    res.json({ events: [], alerts: [] });
+    res.json({ events: [] });
   }
 });
 
