@@ -1,12 +1,13 @@
-// Alert module - SSE connection and alert processing
+// Alert module - polling-based with SSE upgrade
 const AlertService = (function () {
   let eventSource = null;
-  let reconnectAttempts = 0;
+  let pollInterval = null;
   let cities = {};
-  const processedIds = new Set();
-  const MAX_PROCESSED = 5000;
+  let useSSE = false;
+  let sseConnected = false;
+  let historyLoaded = false;
 
-  // Callbacks
+  // Callbacks: onAlert(alerts, events), onClear(), onConnectionChange(status), onInit(alerts, events)
   let onAlert = null;
   let onClear = null;
   let onConnectionChange = null;
@@ -22,15 +23,48 @@ const AlertService = (function () {
     }
   }
 
-  function connect() {
+  // Load alert history
+  async function loadHistory() {
+    if (historyLoaded) return;
+    try {
+      const res = await fetch('/api/alerts/history-proxy');
+      if (res.ok) {
+        const data = await res.json();
+        const events = data.events || [];
+        const alerts = data.alerts || [];
+        if (events.length > 0 || alerts.length > 0) {
+          historyLoaded = true;
+          if (onInit) onInit(alerts, events);
+        }
+      }
+    } catch (e) {
+      console.log('History proxy unavailable');
+    }
+  }
+
+  // Try SSE connection (works on persistent servers, fails on serverless)
+  function trySSE() {
     if (eventSource) {
       eventSource.close();
     }
 
     eventSource = new EventSource('/api/alerts/sse');
+    let sseTimeout = null;
+
+    sseTimeout = setTimeout(() => {
+      if (!sseConnected) {
+        console.log('SSE connection timeout, using polling mode');
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+      }
+    }, 5000);
 
     eventSource.onopen = () => {
-      reconnectAttempts = 0;
+      sseConnected = true;
+      useSSE = true;
+      clearTimeout(sseTimeout);
       if (onConnectionChange) onConnectionChange('connected');
       console.log('SSE connected');
     };
@@ -41,11 +75,12 @@ const AlertService = (function () {
 
         switch (data.type) {
           case 'init':
-            if (onInit) onInit(data.alerts, data.history);
+            historyLoaded = true;
+            if (onInit) onInit(data.alerts || [], data.events || data.history || []);
             break;
 
           case 'alert':
-            handleNewAlerts(data.alerts);
+            if (onAlert) onAlert(data.alerts || [], data.events || []);
             break;
 
           case 'clear':
@@ -58,47 +93,79 @@ const AlertService = (function () {
     };
 
     eventSource.onerror = () => {
-      if (onConnectionChange) onConnectionChange('disconnected');
-
-      // EventSource auto-reconnects, but we track attempts
-      reconnectAttempts++;
-      if (reconnectAttempts > 10) {
-        console.log('Too many reconnection attempts, backing off...');
-        eventSource.close();
-        setTimeout(connect, 5000);
+      sseConnected = false;
+      useSSE = false;
+      if (!pollInterval) {
+        if (onConnectionChange) onConnectionChange('disconnected');
       }
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      clearTimeout(sseTimeout);
+      console.log('SSE failed, polling mode active');
     };
   }
 
-  function handleNewAlerts(alerts) {
-    if (!alerts || alerts.length === 0) return;
+  // Poll /api/alerts/current every 2 seconds
+  function startPolling() {
+    let lastEventIds = '';
+    let consecutiveErrors = 0;
+    let pollConnected = false;
 
-    const newAlerts = [];
-    for (const alert of alerts) {
-      // Deduplicate
-      if (processedIds.has(alert.id)) continue;
-      processedIds.add(alert.id);
+    async function poll() {
+      try {
+        const res = await fetch('/api/alerts/current');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      // Clean up old IDs to prevent memory leak
-      if (processedIds.size > MAX_PROCESSED) {
-        const idsArray = Array.from(processedIds);
-        for (let i = 0; i < 1000; i++) {
-          processedIds.delete(idsArray[i]);
+        const data = await res.json();
+        consecutiveErrors = 0;
+
+        if (!pollConnected) {
+          pollConnected = true;
+          if (!sseConnected) {
+            if (onConnectionChange) onConnectionChange('connected');
+          }
+        }
+
+        const events = data.events || [];
+        const alerts = data.alerts || [];
+
+        if (events.length > 0) {
+          const eventIds = events.map(e => e.eventId).sort().join(',');
+          if (eventIds !== lastEventIds) {
+            lastEventIds = eventIds;
+            if (onAlert) onAlert(alerts, events);
+          }
+        } else {
+          if (lastEventIds !== '') {
+            lastEventIds = '';
+            if (onClear) onClear();
+          }
+        }
+      } catch (e) {
+        consecutiveErrors++;
+        if (consecutiveErrors > 5 && pollConnected) {
+          pollConnected = false;
+          if (!sseConnected) {
+            if (onConnectionChange) onConnectionChange('disconnected');
+          }
         }
       }
-
-      newAlerts.push(alert);
     }
 
-    if (newAlerts.length > 0 && onAlert) {
-      onAlert(newAlerts);
-    }
+    poll();
+    pollInterval = setInterval(poll, 2000);
   }
 
   function disconnect() {
     if (eventSource) {
       eventSource.close();
       eventSource = null;
+    }
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
     }
   }
 
@@ -110,7 +177,15 @@ const AlertService = (function () {
       onInit = callbacks.onInit;
 
       await loadCities();
-      connect();
+
+      // Start polling immediately (works everywhere)
+      startPolling();
+
+      // Load alert history from tzevaadom
+      loadHistory();
+
+      // Try SSE as an upgrade (works on persistent servers)
+      trySSE();
     },
 
     disconnect,

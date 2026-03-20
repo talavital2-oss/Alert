@@ -6,10 +6,11 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Load city data
+// Load comprehensive city data (1449 cities from tzevaadom)
 const cities = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'cities.json'), 'utf8'));
+console.log(`Loaded ${Object.keys(cities).length} cities`);
 
-// Alert state
+// Alert state (for persistent server mode / SSE)
 let currentAlerts = [];
 let alertHistory = [];
 const MAX_HISTORY = 200;
@@ -24,7 +25,7 @@ app.get('/api/cities', (req, res) => {
   res.json(cities);
 });
 
-// SSE endpoint
+// SSE endpoint (works on persistent servers, not on serverless)
 app.get('/api/alerts/sse', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -46,20 +47,279 @@ app.get('/api/alerts/sse', (req, res) => {
 
   // Keep-alive ping every 15s
   const keepAlive = setInterval(() => {
-    res.write(': keepalive\n\n');
+    try { res.write(': keepalive\n\n'); } catch (e) { clearInterval(keepAlive); }
   }, 15000);
 
   req.on('close', () => clearInterval(keepAlive));
 });
 
-// Alert history REST endpoint
+// Alert history REST endpoint (in-memory, for persistent server)
 app.get('/api/alerts/history', (req, res) => {
   res.json(alertHistory);
 });
 
+// ============================================================
+// Stateless proxy endpoints (work on serverless / Vercel)
+// Uses tzevaadom.co.il API which is NOT geo-blocked
+// ============================================================
+
+// Helper: fetch JSON from a URL
+function fetchJson(url, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(new Error('Parse error'));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(timeout, () => { req.destroy(); reject(new Error('Timeout')); });
+  });
+}
+
+// Map tzevaadom threat codes to our alert types
+function threatToType(threat) {
+  switch (threat) {
+    case 0: return 'missiles';         // Rockets/Missiles
+    case 1: return 'general';          // General
+    case 2: return 'earthquake';       // Earthquake
+    case 3: return 'tsunami';          // Tsunami
+    case 4: return 'radiological';     // Radiological
+    case 5: return 'hostile_aircraft'; // Hostile aircraft/drones
+    case 6: return 'infiltration';     // Terrorist infiltration
+    default: return 'missiles';
+  }
+}
+
+// Threat type to Hebrew title
+function threatToTitle(threat) {
+  switch (threat) {
+    case 0: return 'ירי רקטות וטילים';
+    case 1: return 'אירוע כללי';
+    case 2: return 'רעידת אדמה';
+    case 3: return 'צונאמי';
+    case 4: return 'חומרים מסוכנים';
+    case 5: return 'חדירת כלי טיס עוין';
+    case 6: return 'חדירת מחבלים';
+    default: return 'צבע אדום';
+  }
+}
+
+// Process tzevaadom alert entries into per-city alerts (for map markers)
+function processTzevaadomAlerts(entries) {
+  const processed = [];
+  for (const entry of entries) {
+    const alerts = entry.alerts || [];
+    for (const alert of alerts) {
+      const alertCities = alert.cities || [];
+      const alertType = threatToType(alert.threat);
+      const title = threatToTitle(alert.threat);
+      const timeMs = alert.time ? alert.time * 1000 : Date.now();
+      const timestamp = new Date(timeMs).toISOString();
+
+      for (const cityName of alertCities) {
+        const cityData = cities[cityName];
+        processed.push({
+          id: `${entry.id}-${cityName}`,
+          eventId: entry.id,
+          city: cityName,
+          cityEn: cityData ? cityData.en : cityName,
+          lat: cityData ? cityData.lat : null,
+          lng: cityData ? cityData.lng : null,
+          countdown: cityData ? cityData.countdown : 90,
+          area: cityData ? (cityData.areaHe || '') : '',
+          areaEn: cityData ? (cityData.areaEn || '') : '',
+          type: alertType,
+          title: title,
+          desc: '',
+          isDrill: alert.isDrill || false,
+          timeMs,
+          timestamp
+        });
+      }
+    }
+  }
+  return processed;
+}
+
+// Group per-city alerts into events (for history panel)
+// Returns array sorted newest-first, each with areas, cities, time range
+function groupAlertsIntoEvents(perCityAlerts) {
+  // Group by eventId
+  const eventMap = new Map();
+  for (const alert of perCityAlerts) {
+    const eid = alert.eventId;
+    if (!eventMap.has(eid)) {
+      eventMap.set(eid, {
+        eventId: eid,
+        type: alert.type,
+        title: alert.title,
+        cities: [],
+        areas: new Set(),
+        minTime: alert.timeMs,
+        maxTime: alert.timeMs,
+        isDrill: alert.isDrill
+      });
+    }
+    const ev = eventMap.get(eid);
+    ev.cities.push({
+      city: alert.city,
+      cityEn: alert.cityEn,
+      lat: alert.lat,
+      lng: alert.lng,
+      countdown: alert.countdown,
+      timeMs: alert.timeMs,
+      id: alert.id
+    });
+    if (alert.area) ev.areas.add(alert.area);
+    if (alert.timeMs < ev.minTime) ev.minTime = alert.timeMs;
+    if (alert.timeMs > ev.maxTime) ev.maxTime = alert.timeMs;
+  }
+
+  // Convert to sorted array (newest first by maxTime)
+  const events = Array.from(eventMap.values()).map(ev => ({
+    eventId: ev.eventId,
+    type: ev.type,
+    title: ev.title,
+    areas: Array.from(ev.areas),
+    cities: ev.cities.sort((a, b) => a.timeMs - b.timeMs),
+    cityCount: ev.cities.length,
+    minTime: ev.minTime,
+    maxTime: ev.maxTime,
+    minTimestamp: new Date(ev.minTime).toISOString(),
+    maxTimestamp: new Date(ev.maxTime).toISOString(),
+    isDrill: ev.isDrill
+  }));
+
+  events.sort((a, b) => b.maxTime - a.maxTime);
+  return events;
+}
+
+// Current active alerts via tzevaadom (NOT geo-blocked)
+app.get('/api/alerts/current', async (req, res) => {
+  try {
+    const data = await fetchJson('https://api.tzevaadom.co.il/alerts-history');
+
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({ alerts: [], events: [], timestamp: new Date().toISOString() });
+    }
+
+    // Only include alerts from the last 5 minutes as "current"
+    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+    const recent = data.filter(entry => {
+      const alerts = entry.alerts || [];
+      return alerts.some(a => a.time && (a.time * 1000) > fiveMinAgo);
+    });
+
+    const perCity = processTzevaadomAlerts(recent);
+    const events = groupAlertsIntoEvents(perCity);
+    res.json({ alerts: perCity, events, timestamp: new Date().toISOString() });
+  } catch (e) {
+    try {
+      const orefData = await fetchOrefAlerts();
+      res.json({ alerts: orefData, events: [], timestamp: new Date().toISOString() });
+    } catch (e2) {
+      res.json({ alerts: [], events: [], timestamp: new Date().toISOString(), error: 'both_sources_failed' });
+    }
+  }
+});
+
+// Alert history via tzevaadom (NOT geo-blocked)
+// Returns grouped events sorted newest-first
+app.get('/api/alerts/history-proxy', async (req, res) => {
+  try {
+    const data = await fetchJson('https://api.tzevaadom.co.il/alerts-history');
+
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({ events: [], alerts: [] });
+    }
+
+    const perCity = processTzevaadomAlerts(data);
+    const events = groupAlertsIntoEvents(perCity);
+    res.json({ events });
+  } catch (e) {
+    res.json({ events: [] });
+  }
+});
+
+// Fallback: fetch from oref directly (only works from Israeli IP)
+function fetchOrefAlerts() {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'www.oref.org.il',
+      path: '/WarningMessages/alert/alerts.json',
+      method: 'GET',
+      headers: {
+        'Referer': 'https://www.oref.org.il/',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Client': 'true',
+        'Accept': 'application/json',
+        'Accept-Language': 'he-IL,he;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      timeout: 3000
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          data = data.replace(/^\uFEFF/, '').trim();
+          if (!data || data === '[]' || data === '') {
+            return resolve([]);
+          }
+          const alerts = JSON.parse(data);
+          if (!Array.isArray(alerts) || alerts.length === 0) return resolve([]);
+
+          const timestamp = new Date().toISOString();
+          const processed = [];
+          for (const alert of alerts) {
+            const alertCities = alert.data || alert.cities || [];
+            const alertType = categorizeAlert(alert.cat || alert.type || '');
+            for (const cityName of alertCities) {
+              const cityData = cities[cityName];
+              processed.push({
+                id: `${alert.id || Date.now()}-${cityName}`,
+                city: cityName,
+                cityEn: cityData ? cityData.en : cityName,
+                lat: cityData ? cityData.lat : null,
+                lng: cityData ? cityData.lng : null,
+                countdown: cityData ? cityData.countdown : 90,
+                area: cityData ? (cityData.areaHe || '') : '',
+                areaEn: cityData ? (cityData.areaEn || '') : '',
+                type: alertType,
+                title: alert.title || '',
+                desc: alert.desc || '',
+                timestamp
+              });
+            }
+          }
+          resolve(processed);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+    req.end();
+  });
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', clients: sseClients.size, uptime: process.uptime() });
+  res.json({
+    status: 'ok',
+    clients: sseClients.size,
+    uptime: process.uptime(),
+    cityCount: Object.keys(cities).length
+  });
 });
 
 // Broadcast to all SSE clients
@@ -74,8 +334,55 @@ function broadcast(data) {
   }
 }
 
-// Fetch alerts from Pikud HaOref
-function fetchAlerts() {
+// Fetch alerts for SSE broadcast (persistent server mode)
+// Tries tzevaadom first, falls back to oref
+async function fetchAlerts() {
+  try {
+    const data = await fetchJson('https://api.tzevaadom.co.il/alerts-history');
+
+    if (!Array.isArray(data) || data.length === 0) {
+      if (currentAlerts.length > 0) {
+        currentAlerts = [];
+        broadcast({ type: 'clear' });
+      }
+      return;
+    }
+
+    // Only current alerts (last 2 minutes for SSE mode)
+    const twoMinAgo = Date.now() - 2 * 60 * 1000;
+    const recent = data.filter(entry => {
+      const alerts = entry.alerts || [];
+      return alerts.some(a => a.time && (a.time * 1000) > twoMinAgo);
+    });
+
+    if (recent.length === 0) {
+      if (currentAlerts.length > 0) {
+        currentAlerts = [];
+        broadcast({ type: 'clear' });
+      }
+      return;
+    }
+
+    const processed = processTzevaadomAlerts(recent);
+    const alertJson = JSON.stringify(processed.map(a => a.id).sort());
+
+    if (alertJson === lastAlertJson) return;
+    lastAlertJson = alertJson;
+
+    if (processed.length > 0) {
+      currentAlerts = processed;
+      alertHistory = [...processed, ...alertHistory].slice(0, MAX_HISTORY);
+      broadcast({ type: 'alert', alerts: processed });
+      console.log(`[${new Date().toISOString()}] Alert: ${processed.length} cities - ${processed.map(a => a.city).join(', ')}`);
+    }
+  } catch (e) {
+    // Fallback to oref
+    fetchOrefForSSE();
+  }
+}
+
+// Legacy oref polling for SSE (fallback)
+function fetchOrefForSSE() {
   const options = {
     hostname: 'www.oref.org.il',
     path: '/WarningMessages/alert/alerts.json',
@@ -93,24 +400,17 @@ function fetchAlerts() {
 
   const req = https.request(options, (res) => {
     let data = '';
-
     res.on('data', (chunk) => { data += chunk; });
-
     res.on('end', () => {
       try {
-        // Clean BOM if present
         data = data.replace(/^\uFEFF/, '').trim();
-
         if (!data || data === '[]' || data === '') {
-          // No active alerts
           if (currentAlerts.length > 0) {
             currentAlerts = [];
             broadcast({ type: 'clear' });
           }
           return;
         }
-
-        // Only process if data changed
         if (data === lastAlertJson) return;
         lastAlertJson = data;
 
@@ -123,72 +423,59 @@ function fetchAlerts() {
           return;
         }
 
-        // Process new alerts
         const timestamp = new Date().toISOString();
         const processedAlerts = [];
-
         for (const alert of alerts) {
           const alertCities = alert.data || alert.cities || [];
           const alertType = categorizeAlert(alert.cat || alert.type || '');
-
           for (const cityName of alertCities) {
             const cityData = cities[cityName];
-            const processed = {
+            processedAlerts.push({
               id: `${alert.id || Date.now()}-${cityName}`,
               city: cityName,
               cityEn: cityData ? cityData.en : cityName,
               lat: cityData ? cityData.lat : null,
               lng: cityData ? cityData.lng : null,
               countdown: cityData ? cityData.countdown : 90,
+              area: cityData ? (cityData.areaHe || '') : '',
+              areaEn: cityData ? (cityData.areaEn || '') : '',
               type: alertType,
               title: alert.title || '',
               desc: alert.desc || '',
               timestamp
-            };
-            processedAlerts.push(processed);
+            });
           }
         }
 
         if (processedAlerts.length > 0) {
           currentAlerts = processedAlerts;
-          // Add to history (newest first)
           alertHistory = [...processedAlerts, ...alertHistory].slice(0, MAX_HISTORY);
-
           broadcast({ type: 'alert', alerts: processedAlerts });
-          console.log(`[${timestamp}] Alert: ${processedAlerts.length} cities - ${processedAlerts.map(a => a.city).join(', ')}`);
+          console.log(`[${timestamp}] Alert (oref): ${processedAlerts.length} cities`);
         }
       } catch (e) {
-        // Silently handle parse errors (common with empty/malformed responses)
-        if (data && data.length > 2) {
-          console.error('Parse error:', e.message, 'Data:', data.substring(0, 100));
-        }
+        // Silently handle parse errors
       }
     });
   });
 
-  req.on('error', (e) => {
-    // Silently handle connection errors - they're expected when geo-blocked
-  });
-
-  req.on('timeout', () => {
-    req.destroy();
-  });
-
+  req.on('error', () => {});
+  req.on('timeout', () => { req.destroy(); });
   req.end();
 }
 
-// Categorize alert type from category number
+// Categorize alert type from oref category number
 function categorizeAlert(cat) {
   const catNum = parseInt(cat);
   switch (catNum) {
-    case 1: return 'missiles';        // צבע אדום - Rockets/Missiles
-    case 2: return 'general';         // אירוע כללי
-    case 3: return 'earthquake';      // רעידת אדמה
-    case 4: return 'radiological';    // חומ"ס רדיולוגי
-    case 5: return 'tsunami';         // צונאמי
-    case 6: return 'hostile_aircraft'; // חדירת כלי טיס עוין
-    case 7: return 'chemical';        // חומ"ס כימי
-    case 13: return 'infiltration';   // חדירת מחבלים
+    case 1: return 'missiles';
+    case 2: return 'general';
+    case 3: return 'earthquake';
+    case 4: return 'radiological';
+    case 5: return 'tsunami';
+    case 6: return 'hostile_aircraft';
+    case 7: return 'chemical';
+    case 13: return 'infiltration';
     default:
       if (typeof cat === 'string') {
         if (cat.includes('missile') || cat.includes('rocket') || cat.includes('אדום')) return 'missiles';
@@ -196,17 +483,26 @@ function categorizeAlert(cat) {
         if (cat.includes('earth') || cat.includes('רעידת')) return 'earthquake';
         if (cat.includes('infiltr') || cat.includes('חדירת')) return 'infiltration';
       }
-      return 'missiles'; // Default to missiles (most common)
+      return 'missiles';
   }
 }
 
-// Start polling
-console.log('Starting Pikud HaOref alert polling (every 1 second)...');
-setInterval(fetchAlerts, 1000);
-fetchAlerts(); // Initial fetch
-
 // Start server
-app.listen(PORT, () => {
-  console.log(`Israel Alert Map running at http://localhost:${PORT}`);
-  console.log(`SSE endpoint: http://localhost:${PORT}/api/alerts/sse`);
-});
+function start() {
+  // Start polling for SSE mode (persistent server)
+  console.log('Starting alert polling (every 2 seconds)...');
+  setInterval(fetchAlerts, 2000);
+  fetchAlerts();
+
+  app.listen(PORT, () => {
+    console.log(`Israel Alert Map running at http://localhost:${PORT}`);
+  });
+}
+
+// For Vercel serverless: export the app
+module.exports = app;
+
+// For direct execution: start the server
+if (require.main === module) {
+  start();
+}
