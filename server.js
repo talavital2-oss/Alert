@@ -329,6 +329,74 @@ function fetchOrefAlerts() {
   });
 }
 
+// Areas endpoint - unique areas from city data with countdown times
+app.get('/api/areas', (req, res) => {
+  const areaMap = new Map();
+  for (const [, city] of Object.entries(cities)) {
+    if (city.areaHe && !areaMap.has(city.areaHe)) {
+      areaMap.set(city.areaHe, { name: city.areaHe, nameEn: city.areaEn || '', countdown: city.countdown || 90 });
+    }
+  }
+  const areas = Array.from(areaMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  res.json(areas);
+});
+
+// Statistics endpoint - aggregates 24h data from tzevaadom history
+app.get('/api/stats', async (req, res) => {
+  try {
+    const data = await fetchJson('https://api.tzevaadom.co.il/alerts-history');
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({ eventCount: 0, cityCount: 0, alertCount: 0, peakHour: '—', types: [], areas: [], hourly: [] });
+    }
+
+    const perCity = processTzevaadomAlerts(data);
+    const events = groupAlertsIntoEvents(perCity);
+
+    // 24h filter
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const recentEvents = events.filter(e => e.maxTime > dayAgo);
+    const recentAlerts = perCity.filter(a => a.timeMs > dayAgo);
+
+    const allCities = new Set();
+    const typeCounts = {};
+    const areaCounts = {};
+    const hourlyCounts = new Array(24).fill(0);
+
+    for (const ev of recentEvents) {
+      typeCounts[ev.type] = (typeCounts[ev.type] || 0) + 1;
+      for (const a of ev.areas) {
+        areaCounts[a] = (areaCounts[a] || 0) + ev.cityCount;
+      }
+    }
+
+    for (const a of recentAlerts) {
+      allCities.add(a.city);
+      const d = new Date(a.timeMs);
+      const h = parseInt(d.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Jerusalem' }));
+      hourlyCounts[h] = (hourlyCounts[h] || 0) + 1;
+    }
+
+    // Peak hour
+    let peakH = 0, peakV = 0;
+    hourlyCounts.forEach((v, h) => { if (v > peakV) { peakV = v; peakH = h; } });
+
+    const types = Object.entries(typeCounts).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count);
+    const areas = Object.entries(areaCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+
+    res.json({
+      eventCount: recentEvents.length,
+      cityCount: allCities.size,
+      alertCount: recentAlerts.length,
+      peakHour: peakV > 0 ? `${String(peakH).padStart(2, '0')}:00` : '—',
+      types,
+      areas: areas.slice(0, 15),
+      hourly: hourlyCounts
+    });
+  } catch (e) {
+    res.json({ eventCount: 0, cityCount: 0, alertCount: 0, peakHour: '—', types: [], areas: [], hourly: [] });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
