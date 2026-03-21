@@ -342,7 +342,7 @@
   function initSoundSetting() {
     const btn = document.getElementById('sound-toggle-setting');
     function updateBtn() {
-      const enabled = SoundManager.isEnabled();
+      const enabled = SoundManager.enabled;
       btn.textContent = enabled ? 'צליל מופעל' : 'הפעל צליל';
       btn.classList.toggle('active', enabled);
     }
