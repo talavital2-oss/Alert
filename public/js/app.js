@@ -27,11 +27,11 @@
     alertPanel.classList.toggle('panel-open');
 
     const mapEl = document.getElementById('map');
-    if (alertPanel.classList.contains('panel-closed')) {
-      mapEl.style.right = '0';
-    } else {
-      mapEl.style.right = window.innerWidth <= 768 ? '0' : 'var(--panel-width)';
-    }
+    const mapGl = document.getElementById('map-gl');
+    const rightVal = alertPanel.classList.contains('panel-closed') ? '0' :
+      (window.innerWidth <= 768 ? '0' : 'var(--panel-width)');
+    mapEl.style.right = rightVal;
+    mapGl.style.right = rightVal;
     setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
   });
 
@@ -242,11 +242,10 @@
 
   // Handle window resize
   window.addEventListener('resize', () => {
-    if (window.innerWidth <= 768) {
-      document.getElementById('map').style.right = '0';
-    } else if (!alertPanel.classList.contains('panel-closed')) {
-      document.getElementById('map').style.right = 'var(--panel-width)';
-    }
+    const rightVal = (window.innerWidth <= 768 || alertPanel.classList.contains('panel-closed'))
+      ? '0' : 'var(--panel-width)';
+    document.getElementById('map').style.right = rightVal;
+    document.getElementById('map-gl').style.right = rightVal;
   });
 
   console.log('Israel Alert Map initialized');
