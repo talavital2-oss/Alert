@@ -468,6 +468,118 @@ html, body {
 }
 
 /* ===== Dark map tile filter for extra contrast ===== */
-.leaflet-tile-pane {
+[data-theme="dark"] .leaflet-tile-pane {
   filter: brightness(0.95);
+}
+
+/* ===== Light Theme ===== */
+[data-theme="light"] {
+  --bg-dark: #f3f4f6;
+  --bg-panel: #ffffff;
+  --bg-card: #f9fafb;
+  --bg-card-hover: #f0f1f3;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-dim: #9ca3af;
+  --border: #d1d5db;
+}
+
+[data-theme="light"] #status-bar {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+[data-theme="light"] .leaflet-control-zoom a {
+  background: #fff !important;
+  color: #333 !important;
+  border-color: #ccc !important;
+}
+
+[data-theme="light"] .leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.85) !important;
+  color: #666 !important;
+}
+
+[data-theme="light"] .leaflet-control-attribution a {
+  color: #333 !important;
+}
+
+[data-theme="light"] .alert-popup .leaflet-popup-content-wrapper {
+  background: #fff;
+  color: #111;
+  border-color: #d1d5db;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .alert-popup .leaflet-popup-tip {
+  background: #fff;
+  border-color: #d1d5db;
+}
+
+/* ===== Map Style Control ===== */
+.map-style-control {
+  position: relative;
+}
+
+.map-style-btn {
+  width: 34px;
+  height: 34px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.map-style-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.map-style-dropdown {
+  position: absolute;
+  bottom: 40px;
+  left: 0;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+}
+
+[data-theme="light"] .map-style-dropdown {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+.map-style-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+  text-align: right;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.map-style-item:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.map-style-item.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-weight: 600;
 }

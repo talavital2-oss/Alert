@@ -1,6 +1,8 @@
 // Map module - Leaflet map with alert markers
 const AlertMap = (function () {
   let map = null;
+  let currentTileLayer = null;
+  let currentStyleId = null;
   const markers = new Map(); // alertId -> { marker, timeout }
   const MARKER_LIFETIME = 5 * 60 * 1000; // 5 minutes
 
@@ -37,6 +39,146 @@ const AlertMap = (function () {
     tsunami: 'Tsunami'
   };
 
+  // Available map tile styles
+  const tileStyles = [
+    {
+      id: 'carto-dark',
+      name: 'Dark',
+      theme: 'dark',
+      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 20
+    },
+    {
+      id: 'carto-light',
+      name: 'Light',
+      theme: 'light',
+      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 20
+    },
+    {
+      id: 'osm',
+      name: 'OpenStreetMap',
+      theme: 'light',
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19
+    },
+    {
+      id: 'google-streets',
+      name: 'Google Streets',
+      theme: 'light',
+      url: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+      attribution: '&copy; Google',
+      maxZoom: 20
+    },
+    {
+      id: 'google-satellite',
+      name: 'Google Satellite',
+      theme: 'dark',
+      url: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+      attribution: '&copy; Google',
+      maxZoom: 20
+    },
+    {
+      id: 'google-hybrid',
+      name: 'Google Hybrid',
+      theme: 'dark',
+      url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+      attribution: '&copy; Google',
+      maxZoom: 20
+    },
+    {
+      id: 'esri-satellite',
+      name: 'Esri Satellite',
+      theme: 'dark',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      attribution: '&copy; Esri',
+      maxZoom: 18
+    },
+    {
+      id: 'esri-topo',
+      name: 'Esri Topographic',
+      theme: 'light',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+      attribution: '&copy; Esri',
+      maxZoom: 18
+    }
+  ];
+
+  function setTileStyle(styleId) {
+    const style = tileStyles.find(s => s.id === styleId);
+    if (!style) return;
+
+    if (currentTileLayer) {
+      map.removeLayer(currentTileLayer);
+    }
+
+    const opts = {
+      attribution: style.attribution,
+      maxZoom: style.maxZoom || 19
+    };
+    if (style.subdomains) opts.subdomains = style.subdomains;
+
+    currentTileLayer = L.tileLayer(style.url, opts).addTo(map);
+    currentStyleId = style.id;
+
+    // Apply light/dark theme to the page
+    document.documentElement.setAttribute('data-theme', style.theme);
+
+    // Persist choice
+    try { localStorage.setItem('mapStyle', style.id); } catch (e) {}
+
+    return style;
+  }
+
+  function createStyleControl() {
+    const control = L.Control.extend({
+      options: { position: 'bottomleft' },
+      onAdd: function () {
+        const container = L.DomUtil.create('div', 'map-style-control leaflet-bar');
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+
+        // Toggle button
+        const btn = L.DomUtil.create('button', 'map-style-btn', container);
+        btn.title = 'Map style';
+        btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
+
+        // Dropdown
+        const dropdown = L.DomUtil.create('div', 'map-style-dropdown', container);
+        dropdown.style.display = 'none';
+
+        for (const style of tileStyles) {
+          const item = L.DomUtil.create('button', 'map-style-item', dropdown);
+          item.textContent = style.name;
+          item.dataset.styleId = style.id;
+          if (style.id === currentStyleId) item.classList.add('active');
+
+          item.addEventListener('click', () => {
+            setTileStyle(style.id);
+            dropdown.querySelectorAll('.map-style-item').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+            dropdown.style.display = 'none';
+          });
+        }
+
+        btn.addEventListener('click', () => {
+          dropdown.style.display = dropdown.style.display === 'none' ? 'flex' : 'none';
+        });
+
+        // Close dropdown when clicking outside
+        map.on('click', () => { dropdown.style.display = 'none'; });
+
+        return container;
+      }
+    });
+    new control().addTo(map);
+  }
+
   function init() {
     map = L.map('map', {
       center: [31.5, 34.85],
@@ -45,12 +187,12 @@ const AlertMap = (function () {
       attributionControl: true
     });
 
-    // CartoDB Dark Matter tiles
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 19
-    }).addTo(map);
+    // Load saved style or default to dark
+    const savedStyle = (() => { try { return localStorage.getItem('mapStyle'); } catch (e) { return null; } })();
+    setTileStyle(savedStyle || 'carto-dark');
+
+    // Add style selector control
+    createStyleControl();
 
     return map;
   }
