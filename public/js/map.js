@@ -1,5 +1,11 @@
 // Map module - Leaflet map with alert markers + MapLibre GL 3D mode
 // 3D mode uses MapLibre GL JS (free, open source) + OpenFreeMap tiles (free, no API key)
+// Enable RTL text (Hebrew/Arabic) in MapLibre GL
+maplibregl.setRTLTextPlugin(
+  'https://unpkg.com/@maplibre/maplibre-gl-rtl-text@0.3.0/dist/maplibre-gl-rtl-text.min.js',
+  true // lazy-load
+);
+
 const AlertMap = (function () {
   let map = null;           // Leaflet map
   let glMap = null;          // MapLibre GL map
