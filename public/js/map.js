@@ -2,7 +2,7 @@
 // 3D mode uses MapLibre GL JS (free, open source) + OpenFreeMap tiles (free, no API key)
 // Enable RTL text (Hebrew/Arabic) in MapLibre GL
 maplibregl.setRTLTextPlugin(
-  'https://unpkg.com/@maplibre/maplibre-gl-rtl-text@0.3.0/dist/maplibre-gl-rtl-text.min.js',
+  'https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.2.3/mapbox-gl-rtl-text.min.js',
   true // lazy-load
 );
 
