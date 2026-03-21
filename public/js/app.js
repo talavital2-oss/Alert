@@ -248,5 +248,105 @@
     document.getElementById('map-gl').style.right = rightVal;
   });
 
+  // ── Impact tracking (Telegram missile impact reports) ──
+  // After an alert, wait 5-10 minutes then fetch impact data from Telegram
+  let lastAlertTimes = [];        // timestamps of recent alert events
+  let impactPollTimer = null;
+  let currentImpactIds = new Set();
+
+  // Called when new alerts arrive — record the timestamp for impact correlation
+  function recordAlertTime(events) {
+    if (!events || events.length === 0) return;
+    const now = Date.now();
+    for (const ev of events) {
+      lastAlertTimes.push(ev.maxTime || now);
+    }
+    // Keep only last 2 hours of alert times
+    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+    lastAlertTimes = lastAlertTimes.filter(t => t > twoHoursAgo);
+
+    // Schedule impact fetch 5 minutes after this alert
+    if (!impactPollTimer) {
+      impactPollTimer = setTimeout(() => {
+        impactPollTimer = null;
+        fetchImpacts();
+        // Continue polling every 60s for 25 more minutes
+        startImpactPolling();
+      }, 5 * 60 * 1000); // 5 minutes
+    }
+  }
+
+  let impactPollingInterval = null;
+  let impactPollingStop = null;
+
+  function startImpactPolling() {
+    if (impactPollingInterval) return;
+    impactPollingInterval = setInterval(fetchImpacts, 60000); // every 60s
+    // Stop polling after 25 more minutes (total ~30 min window)
+    impactPollingStop = setTimeout(() => {
+      if (impactPollingInterval) {
+        clearInterval(impactPollingInterval);
+        impactPollingInterval = null;
+      }
+    }, 25 * 60 * 1000);
+  }
+
+  async function fetchImpacts() {
+    try {
+      const res = await fetch('/api/impacts');
+      if (!res.ok) return;
+      const data = await res.json();
+      const impacts = data.impacts || [];
+
+      if (impacts.length === 0) return;
+
+      // Filter: only show impacts whose timestamp is within a relevant window
+      // of a known alert (alertTime - 2min to alertTime + 30min)
+      const relevant = impacts.filter(imp => {
+        return lastAlertTimes.some(alertTime => {
+          const diff = imp.timeMs - alertTime;
+          return diff > -2 * 60 * 1000 && diff < 30 * 60 * 1000;
+        });
+      });
+
+      if (relevant.length === 0) return;
+
+      // Remove old impact markers that are no longer in the data
+      const newIds = new Set(relevant.map(i => i.id));
+      for (const oldId of currentImpactIds) {
+        if (!newIds.has(oldId)) {
+          AlertMap.removeImpact(oldId);
+        }
+      }
+
+      // Add new impact markers
+      for (const impact of relevant) {
+        AlertMap.addImpact(impact);
+      }
+      currentImpactIds = newIds;
+
+      console.log(`[Impacts] ${relevant.length} impact locations from Telegram`);
+    } catch (e) {
+      // Silently handle fetch errors
+    }
+  }
+
+  // Hook into the existing handleAlerts to also record alert times
+  const origHandleAlerts = handleAlerts;
+  function handleAlertsWithImpacts(alerts, events) {
+    origHandleAlerts(alerts, events);
+    recordAlertTime(events);
+  }
+
+  // Re-init AlertService with the wrapped handler
+  // (AlertService.init was already called, so we patch the callback)
+  AlertService.disconnect();
+  AlertService.init({
+    onAlert: handleAlertsWithImpacts,
+    onClear: handleClear,
+    onConnectionChange: setConnectionStatus,
+    onInit: handleInit
+  });
+
   console.log('Israel Alert Map initialized');
 })();

@@ -152,6 +152,20 @@ const AlertMap = (function () {
       entry.glMarker = addGLMarker(id, a.lat, a.lng, color, popupHtml);
     }
     syncHistoryMarkersToGL();
+    // Also sync impact markers to GL
+    syncImpactsToGL();
+  }
+
+  function syncImpactsToGL() {
+    if (!glMap) return;
+    for (const [id, entry] of impactMarkers) {
+      if (entry.glMarker) { entry.glMarker.remove(); entry.glMarker = null; }
+      const latlng = entry.leafletMarker.getLatLng();
+      const el = createImpactGLEl();
+      entry.glMarker = new maplibregl.Marker({ element: el })
+        .setLngLat([latlng.lng, latlng.lat])
+        .addTo(glMap);
+    }
   }
 
   function clearGLMarkers() {
@@ -567,5 +581,79 @@ const AlertMap = (function () {
     return event.eventId;
   }
 
-  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn };
+  // ── Impact markers (blue dots from Telegram reports) ──
+  const impactMarkers = new Map(); // id -> { leafletMarker, glMarker, tooltip }
+
+  function createImpactGLEl() {
+    const el = document.createElement('div');
+    el.className = 'impact-gl-marker';
+    el.style.cssText = 'width:12px;height:12px;border-radius:50%;background:#3b82f6;border:2px solid #60a5fa;opacity:0.95;box-shadow:0 0 8px rgba(59,130,246,0.7);cursor:pointer;';
+    return el;
+  }
+
+  function addImpact(impact) {
+    if (!impact.lat || !impact.lng) return;
+    if (impactMarkers.has(impact.id)) return; // already shown
+
+    const color = '#3b82f6';
+
+    // Leaflet marker
+    const marker = L.circleMarker([impact.lat, impact.lng], {
+      radius: 6, color, fillColor: color, fillOpacity: 0.9, weight: 2, opacity: 0.95
+    }).addTo(map);
+
+    // Permanent label showing location name
+    marker.bindTooltip(impact.location, {
+      permanent: true,
+      direction: 'right',
+      offset: [8, 0],
+      className: 'impact-label'
+    });
+
+    // Popup with full message text on click
+    const timeStr = new Date(impact.timeMs).toLocaleTimeString('he-IL', {
+      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem'
+    });
+    marker.bindPopup(`
+      <div class="popup-content" style="direction:rtl;text-align:right;max-width:220px;">
+        <div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px;">📍 ${impact.location}</div>
+        <div style="font-size:12px;color:#d1d5db;line-height:1.4;margin-bottom:6px;">${impact.text}</div>
+        <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+      </div>
+    `, { className: 'alert-popup', maxWidth: 260 });
+
+    // GL marker (if 3D mode)
+    let glMarker = null;
+    if (useGL && glMap) {
+      const el = createImpactGLEl();
+      const popup = new maplibregl.Popup({ offset: 12, maxWidth: '260px' }).setHTML(`
+        <div style="direction:rtl;text-align:right;padding:4px;">
+          <div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px;">📍 ${impact.location}</div>
+          <div style="font-size:12px;color:#d1d5db;line-height:1.4;margin-bottom:6px;">${impact.text}</div>
+          <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+        </div>
+      `);
+      glMarker = new maplibregl.Marker({ element: el })
+        .setLngLat([impact.lng, impact.lat])
+        .setPopup(popup)
+        .addTo(glMap);
+    }
+
+    impactMarkers.set(impact.id, { leafletMarker: marker, glMarker });
+  }
+
+  function removeImpact(id) {
+    const entry = impactMarkers.get(id);
+    if (!entry) return;
+    map.removeLayer(entry.leafletMarker);
+    if (entry.glMarker) entry.glMarker.remove();
+    impactMarkers.delete(id);
+  }
+
+  function clearImpacts() {
+    for (const [id] of impactMarkers) removeImpact(id);
+  }
+
+
+  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts };
 })();

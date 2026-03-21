@@ -329,6 +329,213 @@ function fetchOrefAlerts() {
   });
 }
 
+// ============================================================
+// Impact tracking - Telegram channel monitoring
+// Scrapes https://t.me/s/fireisrael7777 for missile impact reports
+// ============================================================
+
+let telegramCache = { time: 0, impacts: [] };
+const TELEGRAM_CACHE_TTL = 60000; // 60-second cache
+
+// Hebrew keywords indicating an actual impact / fall
+const IMPACT_KEYWORDS = [
+  'נפילה', 'נפילות', 'פגיעה', 'פגיעות',
+  'נפל', 'נפלה', 'נפלו',
+  'יירוט', 'שברי יירוט',
+  'רסיס', 'רסיסים',
+  'אמל״ח', 'אמל"ח', 'אמלח',
+  'פצוע', 'פצועים', 'פצועה',
+  'נחת', 'נחתה', 'נחתו',
+  'פגע', 'פגעה'
+];
+
+// Messages containing these are NOT impacts
+const EXCLUDE_PATTERNS = [
+  'תרגיל', 'בדיקה', 'דיווח שגוי', 'אין נפילות', 'דיווח כוזב',
+  'שקט', 'הותר לפרסום'
+];
+
+// Fetch raw HTML from a URL
+function fetchRawHTML(hostname, urlPath) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(`https://${hostname}${urlPath}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html',
+        'Accept-Language': 'he-IL,he;q=0.9'
+      },
+      timeout: 10000
+    }, (res) => {
+      // Follow redirects
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        try {
+          const u = new URL(res.headers.location);
+          fetchRawHTML(u.hostname, u.pathname + u.search).then(resolve).catch(reject);
+        } catch (e) { reject(e); }
+        return;
+      }
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+  });
+}
+
+// Parse the Telegram public preview HTML into message objects
+function parseTelegramHTML(html) {
+  const messages = [];
+  // Split by message wrapper boundaries
+  const blocks = html.split(/tgme_widget_message_wrap/);
+
+  for (const block of blocks) {
+    const postMatch = block.match(/data-post="[^/]*\/(\d+)"/);
+    if (!postMatch) continue;
+
+    const timeMatch = block.match(/<time[^>]*datetime="([^"]*)"/);
+    if (!timeMatch) continue;
+
+    const textMatch = block.match(/tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/);
+    if (!textMatch) continue;
+
+    // Strip HTML tags, decode entities
+    const text = textMatch[1]
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#0?39;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .trim();
+
+    if (!text) continue;
+
+    messages.push({
+      id: postMatch[1],
+      text,
+      datetime: timeMatch[1],
+      timeMs: new Date(timeMatch[1]).getTime()
+    });
+  }
+
+  return messages;
+}
+
+// Check if message text describes a missile impact
+function isImpactRelated(text) {
+  if (EXCLUDE_PATTERNS.some(p => text.includes(p))) return false;
+  return IMPACT_KEYWORDS.some(kw => text.includes(kw));
+}
+
+// Extract locations from Hebrew impact message text
+function extractLocations(text) {
+  const results = [];
+
+  // 1. Match known city names from cities.json (longest match first)
+  const matchedCities = [];
+  for (const [cityName, cityData] of Object.entries(cities)) {
+    if (cityName.length >= 3 && text.includes(cityName)) {
+      matchedCities.push({ name: cityName, data: cityData });
+    }
+  }
+  matchedCities.sort((a, b) => b.name.length - a.name.length);
+
+  // Remove cities that are substrings of longer matched cities
+  const filtered = [];
+  for (const city of matchedCities) {
+    const isSubstring = filtered.some(c => c.name.includes(city.name) && c.name !== city.name);
+    if (!isSubstring) filtered.push(city);
+  }
+
+  // 2. Extract street / neighborhood / area detail
+  let detail = '';
+  const detailPatterns = [
+    { regex: /(?:ב)?רחוב\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s+[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'רחוב' },
+    { regex: /(?:ב)?שכונת\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s+[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'שכונת' },
+    { regex: /(?:ב)?אזור\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s+[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'אזור' },
+  ];
+
+  for (const p of detailPatterns) {
+    const m = text.match(p.regex);
+    if (m) {
+      detail = `${p.prefix} ${m[1].trim()}`;
+      break;
+    }
+  }
+
+  // 3. Build location results
+  for (const city of filtered) {
+    results.push({
+      name: detail ? `${city.name} - ${detail}` : city.name,
+      lat: city.data.lat,
+      lng: city.data.lng,
+      city: city.name,
+      detail
+    });
+  }
+
+  return results;
+}
+
+// Impact endpoint — returns parsed Telegram impact reports
+app.get('/api/impacts', async (req, res) => {
+  try {
+    const now = Date.now();
+
+    // Return cache if fresh
+    if (now - telegramCache.time < TELEGRAM_CACHE_TTL) {
+      return res.json({ impacts: telegramCache.impacts, cached: true });
+    }
+
+    // Fetch and parse Telegram channel
+    const html = await fetchRawHTML('t.me', '/s/fireisrael7777');
+    const messages = parseTelegramHTML(html);
+
+    // Only messages from last 2 hours that are impact-related
+    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+    const impactMessages = messages.filter(m =>
+      m.timeMs > twoHoursAgo && isImpactRelated(m.text)
+    );
+
+    // Extract locations
+    const impacts = [];
+    const seen = new Set();
+
+    for (const msg of impactMessages) {
+      const locations = extractLocations(msg.text);
+      if (locations.length === 0) continue; // skip if we can't locate it
+
+      for (const loc of locations) {
+        const key = `${msg.id}-${loc.city}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        impacts.push({
+          id: `tg-${msg.id}-${loc.city}`,
+          messageId: msg.id,
+          text: msg.text.substring(0, 300),
+          location: loc.name,
+          city: loc.city,
+          detail: loc.detail,
+          lat: loc.lat,
+          lng: loc.lng,
+          timeMs: msg.timeMs,
+          timestamp: msg.datetime
+        });
+      }
+    }
+
+    telegramCache = { time: now, impacts };
+    res.json({ impacts, cached: false });
+  } catch (e) {
+    console.error('Impact fetch error:', e.message);
+    res.json({ impacts: telegramCache.impacts || [], error: e.message });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
