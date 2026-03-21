@@ -600,8 +600,8 @@ html, body {
   font-weight: 600;
 }
 
-/* Mapbox GL popup overrides */
-.mapboxgl-popup-content {
+/* MapLibre GL popup overrides */
+.maplibregl-popup-content {
   background: var(--bg-panel) !important;
   color: var(--text-primary) !important;
   border: 1px solid var(--border) !important;
@@ -610,15 +610,15 @@ html, body {
   padding: 12px !important;
 }
 
-.mapboxgl-popup-tip {
+.maplibregl-popup-tip {
   border-top-color: var(--bg-panel) !important;
 }
 
-[data-theme="light"] .mapboxgl-popup-content {
+[data-theme="light"] .maplibregl-popup-content {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12) !important;
 }
 
-.mapboxgl-popup-close-button {
+.maplibregl-popup-close-button {
   color: var(--text-dim) !important;
   font-size: 18px !important;
 }

@@ -1,15 +1,12 @@
-// Map module - Leaflet map with alert markers + Mapbox GL 3D mode
+// Map module - Leaflet map with alert markers + MapLibre GL 3D mode
+// 3D mode uses MapLibre GL JS (free, open source) + OpenFreeMap tiles (free, no API key)
 const AlertMap = (function () {
-  // ── Mapbox token ──
-  // Replace with your token from https://account.mapbox.com/access-tokens/
-  const MAPBOX_TOKEN = 'YOUR_MAPBOX_TOKEN_HERE';
-
   let map = null;           // Leaflet map
-  let glMap = null;          // Mapbox GL map
-  let useGL = false;         // true when showing Mapbox GL
+  let glMap = null;          // MapLibre GL map
+  let useGL = false;         // true when showing MapLibre GL
   let currentTileLayer = null;
   let currentStyleId = null;
-  let styleControlContainer = null; // floating control (shared)
+  let styleControlContainer = null;
   const markers = new Map(); // alertId -> { marker, glMarker, timeout, data }
   const MARKER_LIFETIME = 5 * 60 * 1000; // 5 minutes
 
@@ -46,7 +43,7 @@ const AlertMap = (function () {
     tsunami: 'Tsunami'
   };
 
-  // ── Tile styles (Leaflet-based) ──
+  // ── Leaflet tile styles (2D) ──
   const tileStyles = [
     {
       id: 'carto-dark', name: 'Dark', theme: 'dark',
@@ -93,25 +90,20 @@ const AlertMap = (function () {
     }
   ];
 
-  // ── Mapbox GL styles ──
+  // ── MapLibre GL 3D styles (free, no API key) ──
   const glStyles = [
-    { id: 'mapbox-3d-dark', name: '3D Dark', theme: 'dark', mapboxStyle: 'mapbox://styles/mapbox/dark-v11' },
-    { id: 'mapbox-3d-light', name: '3D Light', theme: 'light', mapboxStyle: 'mapbox://styles/mapbox/light-v11' },
-    { id: 'mapbox-3d-streets', name: '3D Streets', theme: 'light', mapboxStyle: 'mapbox://styles/mapbox/streets-v12' },
-    { id: 'mapbox-3d-satellite', name: '3D Satellite', theme: 'dark', mapboxStyle: 'mapbox://styles/mapbox/satellite-streets-v12' }
+    { id: 'gl-3d-liberty', name: '3D Liberty', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/liberty' },
+    { id: 'gl-3d-bright', name: '3D Bright', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/bright' },
+    { id: 'gl-3d-positron', name: '3D Positron', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/positron' }
   ];
 
   // All styles for the dropdown
   const allStyles = [
     ...tileStyles.map(s => ({ ...s, renderer: 'leaflet' })),
-    ...glStyles.map(s => ({ ...s, renderer: 'mapbox' }))
+    ...glStyles.map(s => ({ ...s, renderer: 'maplibre' }))
   ];
 
-  // ── Mapbox GL helpers ──
-  function hasMapboxToken() {
-    return MAPBOX_TOKEN && MAPBOX_TOKEN !== 'YOUR_MAPBOX_TOKEN_HERE';
-  }
-
+  // ── MapLibre GL helpers ──
   function createGLMarkerEl(color) {
     const el = document.createElement('div');
     el.className = 'gl-marker';
@@ -133,16 +125,14 @@ const AlertMap = (function () {
     `;
   }
 
-  // Add a marker to the GL map
   function addGLMarker(id, lat, lng, color, popupHtml) {
     if (!glMap) return null;
     const el = createGLMarkerEl(color);
-    const popup = new mapboxgl.Popup({ offset: 12, maxWidth: '250px' }).setHTML(popupHtml);
-    const glMarker = new mapboxgl.Marker(el).setLngLat([lng, lat]).setPopup(popup).addTo(glMap);
+    const popup = new maplibregl.Popup({ offset: 12, maxWidth: '250px' }).setHTML(popupHtml);
+    const glMarker = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).setPopup(popup).addTo(glMap);
     return glMarker;
   }
 
-  // Sync all current markers to GL map
   function syncMarkersToGL() {
     if (!glMap) return;
     for (const [id, entry] of markers) {
@@ -155,11 +145,9 @@ const AlertMap = (function () {
       const popupHtml = buildPopupHtml(a.city, a.type, countdownText, timeStr);
       entry.glMarker = addGLMarker(id, a.lat, a.lng, color, popupHtml);
     }
-    // Also sync history markers
     syncHistoryMarkersToGL();
   }
 
-  // Remove all GL markers
   function clearGLMarkers() {
     for (const [, entry] of markers) {
       if (entry.glMarker) { entry.glMarker.remove(); entry.glMarker = null; }
@@ -167,13 +155,64 @@ const AlertMap = (function () {
     clearGLHistoryMarkers();
   }
 
-  // ── Switch between Leaflet and Mapbox GL ──
+  // ── Add 3D buildings layer to the GL map ──
+  function add3DBuildings() {
+    if (!glMap) return;
+    const style = glMap.getStyle();
+    if (!style || !style.layers) return;
+
+    // Remove existing 3d-buildings layer if present
+    if (glMap.getLayer('3d-buildings')) return;
+
+    // Find a suitable source with building data
+    // OpenFreeMap uses openmaptiles schema — building data is in the 'building' source-layer
+    const sources = style.sources;
+    let vectorSourceId = null;
+    for (const [srcId, src] of Object.entries(sources)) {
+      if (src.type === 'vector') {
+        vectorSourceId = srcId;
+        break;
+      }
+    }
+    if (!vectorSourceId) return;
+
+    // Find label layer to insert buildings below
+    const labelLayer = style.layers.find(l => l.type === 'symbol' && l.layout && l.layout['text-field']);
+
+    glMap.addLayer({
+      id: '3d-buildings',
+      source: vectorSourceId,
+      'source-layer': 'building',
+      filter: ['all', ['!=', 'hide_3d', true]],
+      type: 'fill-extrusion',
+      minzoom: 13,
+      paint: {
+        'fill-extrusion-color': [
+          'interpolate', ['linear'], ['get', 'render_height'],
+          0, '#e8e8e8',
+          50, '#d4d4d4',
+          100, '#bbb'
+        ],
+        'fill-extrusion-height': [
+          'interpolate', ['linear'], ['zoom'],
+          13, 0,
+          14, ['get', 'render_height']
+        ],
+        'fill-extrusion-base': ['case',
+          ['has', 'render_min_height'], ['get', 'render_min_height'],
+          0
+        ],
+        'fill-extrusion-opacity': 0.7
+      }
+    }, labelLayer ? labelLayer.id : undefined);
+  }
+
+  // ── Switch between Leaflet and MapLibre GL ──
   function activateLeaflet() {
     document.getElementById('map').style.display = '';
     document.getElementById('map-gl').style.display = 'none';
     useGL = false;
     if (glMap) {
-      // Sync view from GL to Leaflet
       const center = glMap.getCenter();
       const zoom = glMap.getZoom();
       map.setView([center.lat, center.lng], Math.round(zoom), { animate: false });
@@ -182,14 +221,7 @@ const AlertMap = (function () {
     map.invalidateSize();
   }
 
-  function activateGL(mapboxStyle) {
-    if (!hasMapboxToken()) {
-      console.warn('Mapbox token not set. Add your token in map.js MAPBOX_TOKEN.');
-      alert('Set your Mapbox token in public/js/map.js to use 3D maps.\nGet a free token at: https://account.mapbox.com/access-tokens/');
-      return false;
-    }
-
-    mapboxgl.accessToken = MAPBOX_TOKEN;
+  function activateGL(styleUrl) {
     const leafletCenter = map.getCenter();
     const leafletZoom = map.getZoom();
 
@@ -197,61 +229,34 @@ const AlertMap = (function () {
     document.getElementById('map-gl').style.display = '';
 
     if (glMap) {
-      glMap.setStyle(mapboxStyle);
+      // Change style on existing map
+      glMap.setStyle(styleUrl);
     } else {
-      glMap = new mapboxgl.Map({
+      glMap = new maplibregl.Map({
         container: 'map-gl',
-        style: mapboxStyle,
+        style: styleUrl,
         center: [leafletCenter.lng, leafletCenter.lat],
         zoom: leafletZoom,
-        pitch: 45,
+        pitch: 50,
         bearing: -10,
-        antialias: true
+        antialias: true,
+        maxPitch: 70
       });
 
-      glMap.addControl(new mapboxgl.NavigationControl(), 'top-left');
-
-      glMap.on('style.load', () => {
-        // Add 3D terrain
-        if (!glMap.getSource('mapbox-dem')) {
-          glMap.addSource('mapbox-dem', {
-            type: 'raster-dem',
-            url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-            tileSize: 512,
-            maxzoom: 14
-          });
-          glMap.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
-        }
-
-        // Add 3D buildings layer
-        const layers = glMap.getStyle().layers;
-        const labelLayer = layers.find(l => l.type === 'symbol' && l.layout && l.layout['text-field']);
-        if (!glMap.getLayer('3d-buildings')) {
-          glMap.addLayer({
-            id: '3d-buildings',
-            source: 'composite',
-            'source-layer': 'building',
-            filter: ['==', 'extrude', 'true'],
-            type: 'fill-extrusion',
-            minzoom: 13,
-            paint: {
-              'fill-extrusion-color': '#aaa',
-              'fill-extrusion-height': ['get', 'height'],
-              'fill-extrusion-base': ['get', 'min_height'],
-              'fill-extrusion-opacity': 0.6
-            }
-          }, labelLayer ? labelLayer.id : undefined);
-        }
-
-        // Sync markers after style loads
-        syncMarkersToGL();
-      });
+      glMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-left');
     }
+
+    // Add 3D buildings and markers after each style load
+    glMap.once('style.load', () => {
+      add3DBuildings();
+      syncMarkersToGL();
+    });
 
     useGL = true;
 
-    // If GL map already loaded, sync markers immediately
+    // If style already loaded, add buildings now
     if (glMap.isStyleLoaded()) {
+      add3DBuildings();
       syncMarkersToGL();
     }
 
@@ -263,9 +268,8 @@ const AlertMap = (function () {
     const style = allStyles.find(s => s.id === styleId);
     if (!style) return;
 
-    if (style.renderer === 'mapbox') {
-      const ok = activateGL(style.mapboxStyle);
-      if (!ok) return; // token not set
+    if (style.renderer === 'maplibre') {
+      activateGL(style.styleUrl);
     } else {
       activateLeaflet();
       if (currentTileLayer) map.removeLayer(currentTileLayer);
@@ -281,9 +285,8 @@ const AlertMap = (function () {
     return style;
   }
 
-  // ── Style control (Leaflet control + floating for GL) ──
+  // ── Style control (floating, works over both maps) ──
   function createStyleControl() {
-    // Create a floating control div that works over both maps
     styleControlContainer = document.createElement('div');
     styleControlContainer.className = 'map-style-control-float';
 
@@ -296,7 +299,7 @@ const AlertMap = (function () {
     dropdown.className = 'map-style-dropdown';
     dropdown.style.display = 'none';
 
-    // Group: Leaflet styles
+    // 2D Maps group
     const leafletLabel = document.createElement('div');
     leafletLabel.className = 'map-style-group-label';
     leafletLabel.textContent = '2D Maps';
@@ -317,10 +320,10 @@ const AlertMap = (function () {
       dropdown.appendChild(item);
     }
 
-    // Group: Mapbox GL styles
+    // 3D Maps group
     const glLabel = document.createElement('div');
     glLabel.className = 'map-style-group-label';
-    glLabel.textContent = '3D Maps (Mapbox)';
+    glLabel.textContent = '3D Maps';
     dropdown.appendChild(glLabel);
 
     for (const style of glStyles) {
@@ -343,7 +346,6 @@ const AlertMap = (function () {
       dropdown.style.display = dropdown.style.display === 'none' ? 'flex' : 'none';
     });
 
-    // Close dropdown on outside click
     document.addEventListener('click', (e) => {
       if (!styleControlContainer.contains(e.target)) {
         dropdown.style.display = 'none';
@@ -364,14 +366,11 @@ const AlertMap = (function () {
       attributionControl: true
     });
 
-    // Hide GL container initially
     document.getElementById('map-gl').style.display = 'none';
 
-    // Load saved style or default to dark
     const savedStyle = (() => { try { return localStorage.getItem('mapStyle'); } catch (e) { return null; } })();
     setTileStyle(savedStyle || 'carto-dark');
 
-    // Add floating style selector
     createStyleControl();
 
     return map;
@@ -408,7 +407,7 @@ const AlertMap = (function () {
     `;
     marker.bindPopup(popupHtml, { className: 'alert-popup', maxWidth: 250 });
 
-    // GL marker (if GL mode active)
+    // GL marker (if 3D mode active)
     let glMarker = null;
     if (useGL && glMap) {
       const glPopupHtml = buildPopupHtml(alert.city, alert.type, countdownText, timeStr);
@@ -429,9 +428,7 @@ const AlertMap = (function () {
   }
 
   function clearAll() {
-    for (const [id] of markers) {
-      removeMarker(id);
-    }
+    for (const [id] of markers) removeMarker(id);
   }
 
   function fitToAlerts(alerts) {
@@ -443,7 +440,7 @@ const AlertMap = (function () {
       if (validAlerts.length === 1) {
         glMap.flyTo({ center: [validAlerts[0].lng, validAlerts[0].lat], zoom: 12 });
       } else {
-        const bounds = new mapboxgl.LngLatBounds();
+        const bounds = new maplibregl.LngLatBounds();
         validAlerts.forEach(a => bounds.extend([a.lng, a.lat]));
         glMap.fitBounds(bounds, { padding: 60, maxZoom: 12 });
       }
@@ -469,11 +466,11 @@ const AlertMap = (function () {
     }
   }
 
-  // ── History event preview (click on panel card) ──
-  let historyMarkers = [];       // Leaflet circle markers
-  let glHistoryMarkers = [];     // Mapbox GL markers
+  // ── History event preview ──
+  let historyMarkers = [];
+  let glHistoryMarkers = [];
   let activeHistoryEventId = null;
-  let activeHistoryEvent = null;  // keep reference for GL sync
+  let activeHistoryEvent = null;
 
   function clearHistoryMarkers() {
     for (const m of historyMarkers) map.removeLayer(m);
@@ -541,16 +538,14 @@ const AlertMap = (function () {
     }
 
     // GL markers
-    if (useGL && glMap) {
-      syncHistoryMarkersToGL();
-    }
+    if (useGL && glMap) syncHistoryMarkersToGL();
 
     // Fit view
     if (useGL && glMap) {
       if (validCities.length === 1) {
         glMap.flyTo({ center: [validCities[0].lng, validCities[0].lat], zoom: 12 });
       } else if (validCities.length > 1) {
-        const bounds = new mapboxgl.LngLatBounds();
+        const bounds = new maplibregl.LngLatBounds();
         validCities.forEach(c => bounds.extend([c.lng, c.lat]));
         glMap.fitBounds(bounds, { padding: 60, maxZoom: 12 });
       }
