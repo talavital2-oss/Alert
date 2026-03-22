@@ -337,6 +337,13 @@ function fetchOrefAlerts() {
 let telegramCache = { time: 0, impacts: [] };
 const TELEGRAM_CACHE_TTL = 30000; // 30-second cache
 
+// Alert-triggered impact polling state
+let lastAlertDetectedAt = 0;           // timestamp of most recent alert detection
+let impactPollingInterval = null;      // interval handle for background polling
+const IMPACT_POLL_DELAY_MS = 120000;   // wait 120s after alert before first poll
+const IMPACT_POLL_WINDOW_MS = 600000;  // keep polling for 10 minutes after alert
+const IMPACT_POLL_INTERVAL_MS = 30000; // poll every 30 seconds during active window
+
 // Telegram channels to scrape for impact reports
 const TELEGRAM_CHANNELS = [
   '/s/fireisrael7777',
@@ -460,42 +467,125 @@ const CITY_ABBREVIATIONS = {
 // e.g., "רחוב יבנה" = Yavne Street, not the city Yavne
 const STREET_PREFIXES = ['רחוב', 'רח\'', 'שדרות', 'שד\'', 'סמטת', 'דרך', 'כיכר'];
 
-// Known area landmarks mapped to their city coordinates
+// Known area landmarks mapped to their city coordinates — ALL regions of Israel
 const AREA_LANDMARKS = {
-  'כיכר הבימה':    { lat: 32.0725, lng: 34.7797, city: 'תל אביב - כיכר הבימה' },
-  'כיכר רבין':     { lat: 32.0794, lng: 34.7808, city: 'תל אביב - כיכר רבין' },
-  'כיכר דיזנגוף':   { lat: 32.0775, lng: 34.7744, city: 'תל אביב - כיכר דיזנגוף' },
-  'נמל תל אביב':   { lat: 32.0972, lng: 34.7733, city: 'תל אביב - הנמל' },
-  'שוק הכרמל':     { lat: 32.0667, lng: 34.7700, city: 'תל אביב - שוק הכרמל' },
-  'תחנה מרכזית':   { lat: 32.0564, lng: 34.7714, city: 'תל אביב - תחנה מרכזית' },
-  'שדרות רוטשילד':  { lat: 32.0633, lng: 34.7747, city: 'תל אביב - רוטשילד' },
-  'אזור התעשייה':   { lat: 0, lng: 0, city: '' }, // generic, skip — needs city context
+  // === Tel Aviv & Gush Dan ===
+  'כיכר הבימה':     { lat: 32.0725, lng: 34.7797, city: 'תל אביב - כיכר הבימה' },
+  'כיכר רבין':      { lat: 32.0794, lng: 34.7808, city: 'תל אביב - כיכר רבין' },
+  'כיכר דיזנגוף':    { lat: 32.0775, lng: 34.7744, city: 'תל אביב - כיכר דיזנגוף' },
+  'כיכר אתרים':     { lat: 32.0778, lng: 34.7683, city: 'תל אביב - כיכר אתרים' },
+  'נמל תל אביב':    { lat: 32.0972, lng: 34.7733, city: 'תל אביב - הנמל' },
+  'שוק הכרמל':      { lat: 32.0667, lng: 34.7700, city: 'תל אביב - שוק הכרמל' },
+  'שדרות רוטשילד':   { lat: 32.0633, lng: 34.7747, city: 'תל אביב - רוטשילד' },
+  'נתב"ג':          { lat: 31.9975, lng: 34.8697, city: 'נתב"ג (שדה תעופה בן גוריון)' },
+  'נתבג':           { lat: 31.9975, lng: 34.8697, city: 'נתב"ג (שדה תעופה בן גוריון)' },
+  'קניון איילון':    { lat: 32.0833, lng: 34.8167, city: 'רמת גן - קניון איילון' },
+  // === Jerusalem ===
+  'כיכר ציון':      { lat: 31.7811, lng: 35.2236, city: 'ירושלים - כיכר ציון' },
+  'הכותל המערבי':   { lat: 31.7767, lng: 35.2345, city: 'ירושלים - הכותל המערבי' },
+  'הכותל':          { lat: 31.7767, lng: 35.2345, city: 'ירושלים - הכותל' },
+  'שער יפו':        { lat: 31.7766, lng: 35.2278, city: 'ירושלים - שער יפו' },
+  'הר הצופים':      { lat: 31.7939, lng: 35.2428, city: 'ירושלים - הר הצופים' },
+  'תלפיות':         { lat: 31.7525, lng: 35.2225, city: 'ירושלים - תלפיות' },
+  'מלחה':           { lat: 31.7511, lng: 35.1886, city: 'ירושלים - מלחה' },
+  // === Haifa & North Coast ===
+  'חוף הכרמל':      { lat: 32.7831, lng: 34.9553, city: 'חיפה - חוף הכרמל' },
+  'מפרץ חיפה':      { lat: 32.8000, lng: 35.0333, city: 'מפרץ חיפה' },
+  'קריון':          { lat: 32.8167, lng: 35.0667, city: 'קריית ביאליק - קריון' },
+  'הר הכרמל':       { lat: 32.7500, lng: 35.0000, city: 'חיפה - הר הכרמל' },
+  // === Upper Galilee & Golan ===
+  'אצבע הגליל':     { lat: 33.1833, lng: 35.5667, city: 'אצבע הגליל' },
+  'באצבע הגליל':    { lat: 33.1833, lng: 35.5667, city: 'אצבע הגליל' },
+  'רמת הגולן':      { lat: 32.9833, lng: 35.7833, city: 'רמת הגולן' },
+  'הגולן':          { lat: 32.9833, lng: 35.7833, city: 'רמת הגולן' },
+  'מטולה':          { lat: 33.2778, lng: 35.5731, city: 'מטולה' },
+  'תל חי':          { lat: 33.2364, lng: 35.5692, city: 'תל חי' },
+  // === South — Negev & Arava ===
+  'שדרות':          { lat: 31.5247, lng: 34.5961, city: 'שדרות' },
+  'עוטף עזה':       { lat: 31.4500, lng: 34.4500, city: 'עוטף עזה' },
+  'נתיבות':         { lat: 31.4214, lng: 34.5883, city: 'נתיבות' },
+  'אופקים':         { lat: 31.3167, lng: 34.6167, city: 'אופקים' },
+  'מצפה רמון':      { lat: 30.6103, lng: 34.8014, city: 'מצפה רמון' },
+  'ערבה':           { lat: 30.0000, lng: 35.1000, city: 'ערבה' },
+  'אילת':           { lat: 29.5569, lng: 34.9517, city: 'אילת' },
+  // === Sharon & Central ===
+  'קניון השרון':     { lat: 32.1833, lng: 34.8833, city: 'נתניה - קניון השרון' },
+  'אזור התעשייה הרצליה': { lat: 32.1667, lng: 34.8000, city: 'הרצליה - אזור התעשייה' },
+  // === Judea & Samaria ===
+  'מעבר קלנדיה':    { lat: 31.8606, lng: 35.2233, city: 'מעבר קלנדיה' },
+  'גוש עציון':      { lat: 31.6500, lng: 35.1167, city: 'גוש עציון' },
+  'בקעת הירדן':     { lat: 32.1500, lng: 35.4500, city: 'בקעת הירדן' },
 };
 
 // Known landmarks (interchanges, junctions, highways) mapped to nearest city coordinates.
 // Telegram reports often reference road landmarks instead of city names.
 const LANDMARK_LOCATIONS = {
-  // Interchanges (מחלפים)
-  'מחלף קסם':      { lat: 32.1064, lng: 34.9511, city: 'מחלף קסם (ליד כפר קאסם)' },
-  'מחלף גלילות':   { lat: 32.1489, lng: 34.8092, city: 'מחלף גלילות (ליד רמת השרון)' },
-  'מחלף השרון':    { lat: 32.1833, lng: 34.8833, city: 'מחלף השרון (ליד הוד השרון)' },
-  'מחלף ענבה':     { lat: 31.8386, lng: 34.9886, city: 'מחלף ענבה (ליד בית שמש)' },
-  'מחלף מורשה':    { lat: 31.8750, lng: 34.8000, city: 'מחלף מורשה (ליד מודיעין)' },
-  'מחלף לוד':      { lat: 31.9500, lng: 34.8833, city: 'מחלף לוד' },
-  'מחלף בן גוריון': { lat: 31.9975, lng: 34.8697, city: 'מחלף בן גוריון (ליד נתב"ג)' },
-  'מחלף אייל':     { lat: 32.2833, lng: 34.9667, city: 'מחלף אייל' },
-  'מחלף רעננה':    { lat: 32.1833, lng: 34.8500, city: 'מחלף רעננה' },
-  'מחלף כפר סבא':  { lat: 32.1833, lng: 34.9167, city: 'מחלף כפר סבא' },
-  'מחלף נחשונים':   { lat: 32.0667, lng: 34.9333, city: 'מחלף נחשונים' },
-  'מחלף ירקון':     { lat: 32.1000, lng: 34.8833, city: 'מחלף ירקון (ליד פתח תקווה)' },
-  'מחלף גהה':      { lat: 32.0833, lng: 34.8333, city: 'מחלף גהה (ליד פתח תקווה)' },
-  // Junctions (צמתים)
-  'צומת מגידו':    { lat: 32.5833, lng: 35.1833, city: 'צומת מגידו' },
-  'צומת גולני':    { lat: 32.7667, lng: 35.5000, city: 'צומת גולני' },
-  'צומת כפר סבא':  { lat: 32.1833, lng: 34.9000, city: 'צומת כפר סבא' },
-  'צומת בילו':     { lat: 31.8500, lng: 34.8167, city: 'צומת בילו' },
-  'צומת שורק':     { lat: 31.7667, lng: 34.7500, city: 'צומת שורק' },
-  'צומת נחשון':    { lat: 31.8333, lng: 34.9833, city: 'צומת נחשון' },
+  // === Interchanges (מחלפים) — Central ===
+  'מחלף קסם':       { lat: 32.1064, lng: 34.9511, city: 'מחלף קסם (ליד כפר קאסם)' },
+  'מחלף גלילות':    { lat: 32.1489, lng: 34.8092, city: 'מחלף גלילות (ליד רמת השרון)' },
+  'מחלף השרון':     { lat: 32.1833, lng: 34.8833, city: 'מחלף השרון (ליד הוד השרון)' },
+  'מחלף ענבה':      { lat: 31.8386, lng: 34.9886, city: 'מחלף ענבה (ליד בית שמש)' },
+  'מחלף מורשה':     { lat: 31.8750, lng: 34.8000, city: 'מחלף מורשה (ליד מודיעין)' },
+  'מחלף לוד':       { lat: 31.9500, lng: 34.8833, city: 'מחלף לוד' },
+  'מחלף בן גוריון':  { lat: 31.9975, lng: 34.8697, city: 'מחלף בן גוריון (ליד נתב"ג)' },
+  'מחלף אייל':      { lat: 32.2833, lng: 34.9667, city: 'מחלף אייל' },
+  'מחלף רעננה':     { lat: 32.1833, lng: 34.8500, city: 'מחלף רעננה' },
+  'מחלף כפר סבא':   { lat: 32.1833, lng: 34.9167, city: 'מחלף כפר סבא' },
+  'מחלף נחשונים':    { lat: 32.0667, lng: 34.9333, city: 'מחלף נחשונים' },
+  'מחלף ירקון':      { lat: 32.1000, lng: 34.8833, city: 'מחלף ירקון (ליד פתח תקווה)' },
+  'מחלף גהה':       { lat: 32.0833, lng: 34.8333, city: 'מחלף גהה (ליד פתח תקווה)' },
+  'מחלף חולון':      { lat: 32.0167, lng: 34.7833, city: 'מחלף חולון' },
+  'מחלף אשדוד':     { lat: 31.8000, lng: 34.6500, city: 'מחלף אשדוד' },
+  'מחלף יבנה':       { lat: 31.8667, lng: 34.7333, city: 'מחלף יבנה' },
+  'מחלף גדרות':      { lat: 31.8167, lng: 34.7667, city: 'מחלף גדרות' },
+  // === Interchanges — North ===
+  'מחלף יגור':       { lat: 32.7333, lng: 35.0667, city: 'מחלף יגור (ליד חיפה)' },
+  'מחלף אלונים':     { lat: 32.7000, lng: 35.1500, city: 'מחלף אלונים' },
+  'מחלף חדרה':      { lat: 32.4333, lng: 34.9167, city: 'מחלף חדרה' },
+  'מחלף פרדס חנה':  { lat: 32.4667, lng: 34.9500, city: 'מחלף פרדס חנה' },
+  'מחלף עפולה':     { lat: 32.6167, lng: 35.2833, city: 'מחלף עפולה' },
+  'מחלף כרמיאל':    { lat: 32.9167, lng: 35.3000, city: 'מחלף כרמיאל' },
+  // === Interchanges — South ===
+  'מחלף באר שבע':   { lat: 31.2500, lng: 34.7833, city: 'מחלף באר שבע' },
+  'מחלף שוקת':      { lat: 31.3333, lng: 34.7333, city: 'מחלף שוקת' },
+  'מחלף קריית גת':  { lat: 31.6167, lng: 34.7500, city: 'מחלף קריית גת' },
+  'מחלף נחל שורק':  { lat: 31.7500, lng: 34.7333, city: 'מחלף נחל שורק' },
+  // === Interchanges — Jerusalem corridor ===
+  'מחלף שער הגיא':  { lat: 31.8000, lng: 35.0500, city: 'מחלף שער הגיא' },
+  'מחלף חמד':       { lat: 31.8167, lng: 35.0167, city: 'מחלף חמד' },
+  'מחלף מוצא':      { lat: 31.7833, lng: 35.1500, city: 'מחלף מוצא (ליד ירושלים)' },
+  // === Junctions (צמתים) — North ===
+  'צומת מגידו':     { lat: 32.5833, lng: 35.1833, city: 'צומת מגידו' },
+  'צומת גולני':     { lat: 32.7667, lng: 35.5000, city: 'צומת גולני' },
+  'צומת עמיעד':     { lat: 32.9167, lng: 35.5333, city: 'צומת עמיעד' },
+  'צומת כורסי':     { lat: 32.8167, lng: 35.6333, city: 'צומת כורסי' },
+  'צומת צמח':       { lat: 32.7167, lng: 35.5667, city: 'צומת צמח' },
+  'צומת כפר תבור':  { lat: 32.6833, lng: 35.4167, city: 'צומת כפר תבור' },
+  'צומת תבור':      { lat: 32.6833, lng: 35.4167, city: 'צומת תבור' },
+  'צומת גילון':     { lat: 32.9000, lng: 35.2833, city: 'צומת גילון' },
+  'צומת כרמיאל':    { lat: 32.9167, lng: 35.3000, city: 'צומת כרמיאל' },
+  // === Junctions — Central ===
+  'צומת כפר סבא':   { lat: 32.1833, lng: 34.9000, city: 'צומת כפר סבא' },
+  'צומת בילו':      { lat: 31.8500, lng: 34.8167, city: 'צומת בילו' },
+  'צומת שורק':      { lat: 31.7667, lng: 34.7500, city: 'צומת שורק' },
+  'צומת נחשון':     { lat: 31.8333, lng: 34.9833, city: 'צומת נחשון' },
+  'צומת ראשון':     { lat: 31.9667, lng: 34.7833, city: 'צומת ראשון לציון' },
+  // === Junctions — South ===
+  'צומת שוקת':      { lat: 31.3333, lng: 34.7333, city: 'צומת שוקת' },
+  'צומת ערד':       { lat: 31.2667, lng: 35.2167, city: 'צומת ערד' },
+  'צומת הנגב':      { lat: 31.2500, lng: 34.7833, city: 'צומת הנגב (באר שבע)' },
+  'צומת להבים':     { lat: 31.3833, lng: 34.8167, city: 'צומת להבים' },
+  'צומת חצרים':     { lat: 31.2333, lng: 34.7167, city: 'צומת חצרים' },
+  'צומת תל ערד':    { lat: 31.2833, lng: 35.1333, city: 'צומת תל ערד' },
+  'צומת נבטים':     { lat: 31.2167, lng: 34.8333, city: 'צומת נבטים' },
+  'צומת רוחמה':     { lat: 31.3667, lng: 34.5833, city: 'צומת רוחמה' },
+  'צומת אופקים':    { lat: 31.3167, lng: 34.6167, city: 'צומת אופקים' },
+  // === Junctions — Judea & Samaria ===
+  'צומת הגוש':      { lat: 31.6500, lng: 35.1167, city: 'צומת הגוש (גוש עציון)' },
+  'צומת אריאל':     { lat: 32.1000, lng: 35.1667, city: 'צומת אריאל' },
+  'צומת תפוח':      { lat: 32.1833, lng: 35.2333, city: 'צומת תפוח' },
+  'צומת חווארה':    { lat: 32.1667, lng: 35.2833, city: 'צומת חווארה' },
+  'צומת זעתרה':     { lat: 32.1167, lng: 35.2667, city: 'צומת זעתרה' },
 };
 
 // Hebrew single-letter prefixes that attach to words (ב=in, ה=the, ל=to, מ=from, ש=that, כ=like, ו=and, ד=of)
@@ -874,6 +964,9 @@ async function fetchAlerts() {
       alertHistory = [...processed, ...alertHistory].slice(0, MAX_HISTORY);
       broadcast({ type: 'alert', alerts: processed });
       console.log(`[${new Date().toISOString()}] Alert: ${processed.length} cities - ${processed.map(a => a.city).join(', ')}`);
+
+      // Trigger impact polling
+      onAlertDetected();
     }
   } catch (e) {
     // Fallback to oref
@@ -952,6 +1045,9 @@ function fetchOrefForSSE() {
           alertHistory = [...processedAlerts, ...alertHistory].slice(0, MAX_HISTORY);
           broadcast({ type: 'alert', alerts: processedAlerts });
           console.log(`[${timestamp}] Alert (oref): ${processedAlerts.length} cities`);
+
+          // Trigger impact polling
+          onAlertDetected();
         }
       } catch (e) {
         // Silently handle parse errors
@@ -984,6 +1080,120 @@ function categorizeAlert(cat) {
         if (cat.includes('infiltr') || cat.includes('חדירת')) return 'infiltration';
       }
       return 'missiles';
+  }
+}
+
+// ============================================================
+// Alert-triggered impact polling
+// Starts 120s after alerts are detected, runs for 10 minutes
+// ============================================================
+
+// Fetch impacts from all Telegram channels (background poller)
+async function fetchImpactsBackground() {
+  const now = Date.now();
+
+  // Check if we're still within the polling window
+  const timeSinceAlert = now - lastAlertDetectedAt;
+  if (timeSinceAlert > IMPACT_POLL_WINDOW_MS) {
+    // Window expired — stop polling
+    if (impactPollingInterval) {
+      clearInterval(impactPollingInterval);
+      impactPollingInterval = null;
+      console.log(`[${new Date().toISOString()}] Impact polling stopped (10-min window expired)`);
+    }
+    return;
+  }
+
+  // Don't poll until 120s after the alert
+  if (timeSinceAlert < IMPACT_POLL_DELAY_MS) return;
+
+  try {
+    // Fetch all channels in parallel
+    const channelResults = await Promise.allSettled(
+      TELEGRAM_CHANNELS.map(async (channel) => {
+        const html = await fetchRawHTML('t.me', channel);
+        return parseTelegramHTML(html).map(m => ({ ...m, channel }));
+      })
+    );
+    const messages = channelResults
+      .filter(r => r.status === 'fulfilled')
+      .flatMap(r => r.value);
+
+    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+    const impactMessages = messages.filter(m =>
+      m.timeMs > twoHoursAgo && isImpactRelated(m.text)
+    );
+
+    // Deduplicate by city + time window
+    const DEDUP_WINDOW_MS = 30 * 60 * 1000;
+    const cityImpactMap = new Map();
+
+    for (const msg of impactMessages) {
+      const locations = extractLocations(msg.text);
+      if (locations.length === 0) continue;
+
+      for (const loc of locations) {
+        const existing = cityImpactMap.get(loc.city);
+        if (existing) {
+          if (Math.abs(msg.timeMs - existing.timeMs) < DEDUP_WINDOW_MS) {
+            if (msg.timeMs > existing.timeMs) {
+              cityImpactMap.set(loc.city, {
+                id: `tg-${msg.id}-${loc.city}`,
+                messageId: msg.id,
+                text: msg.text.substring(0, 300),
+                location: loc.name,
+                city: loc.city,
+                detail: loc.detail,
+                lat: loc.lat,
+                lng: loc.lng,
+                timeMs: msg.timeMs,
+                timestamp: msg.datetime
+              });
+            }
+            continue;
+          }
+        }
+
+        cityImpactMap.set(loc.city, {
+          id: `tg-${msg.id}-${loc.city}`,
+          messageId: msg.id,
+          text: msg.text.substring(0, 300),
+          location: loc.name,
+          city: loc.city,
+          detail: loc.detail,
+          lat: loc.lat,
+          lng: loc.lng,
+          timeMs: msg.timeMs,
+          timestamp: msg.datetime
+        });
+      }
+    }
+
+    const impacts = Array.from(cityImpactMap.values());
+
+    // Only broadcast if impacts changed
+    const impactJson = JSON.stringify(impacts.map(i => i.id).sort());
+    const oldJson = JSON.stringify((telegramCache.impacts || []).map(i => i.id).sort());
+    if (impactJson !== oldJson) {
+      telegramCache = { time: now, impacts };
+      broadcast({ type: 'impacts', impacts });
+      console.log(`[${new Date().toISOString()}] Impact update: ${impacts.length} impacts - ${impacts.map(i => i.city).join(', ')}`);
+    } else {
+      telegramCache.time = now; // refresh cache time even if no change
+    }
+  } catch (e) {
+    console.error('Background impact fetch error:', e.message);
+  }
+}
+
+// Called when alerts are detected — starts impact polling after delay
+function onAlertDetected() {
+  lastAlertDetectedAt = Date.now();
+
+  // Start polling if not already running
+  if (!impactPollingInterval) {
+    console.log(`[${new Date().toISOString()}] Alert detected — impact polling will start in ${IMPACT_POLL_DELAY_MS / 1000}s`);
+    impactPollingInterval = setInterval(fetchImpactsBackground, IMPACT_POLL_INTERVAL_MS);
   }
 }
 
