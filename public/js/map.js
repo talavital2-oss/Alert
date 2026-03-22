@@ -596,7 +596,8 @@ const AlertMap = (function () {
   }
 
   // ── Impact markers (blue dots from Telegram reports) ──
-  const impactMarkers = new Map(); // id -> { leafletMarker, glMarker, tooltip }
+  const impactMarkers = new Map(); // id -> { leafletMarker, glMarker, timeout }
+  const IMPACT_DISPLAY_LIFETIME = 20 * 60 * 1000; // 20 minutes
 
   function createImpactGLEl() {
     const el = document.createElement('div');
@@ -624,17 +625,19 @@ const AlertMap = (function () {
       className: 'impact-label'
     });
 
-    // Popup with full message text on click
+    // Popup with full message text + dismiss button
     const timeStr = new Date(impact.timeMs).toLocaleTimeString('he-IL', {
       hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem'
     });
-    marker.bindPopup(`
+    const popupHtml = `
       <div class="popup-content" style="direction:rtl;text-align:right;max-width:220px;">
         <div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px;">📍 ${impact.location}</div>
         <div style="font-size:12px;color:#d1d5db;line-height:1.4;margin-bottom:6px;">${impact.text}</div>
-        <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">${timeStr}</div>
+        <button onclick="AlertMap.removeImpact('${impact.id}')" style="background:#374151;color:#f9fafb;border:1px solid #4b5563;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;width:100%;">סגור</button>
       </div>
-    `, { className: 'alert-popup', maxWidth: 260 });
+    `;
+    marker.bindPopup(popupHtml, { className: 'alert-popup', maxWidth: 260 });
 
     // GL marker (if 3D mode)
     let glMarker = null;
@@ -644,7 +647,8 @@ const AlertMap = (function () {
         <div style="direction:rtl;text-align:right;padding:4px;">
           <div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px;">📍 ${impact.location}</div>
           <div style="font-size:12px;color:#d1d5db;line-height:1.4;margin-bottom:6px;">${impact.text}</div>
-          <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+          <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">${timeStr}</div>
+          <button onclick="AlertMap.removeImpact('${impact.id}')" style="background:#374151;color:#f9fafb;border:1px solid #4b5563;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;width:100%;">סגור</button>
         </div>
       `);
       glMarker = new maplibregl.Marker({ element: el })
@@ -653,7 +657,10 @@ const AlertMap = (function () {
         .addTo(glMap);
     }
 
-    impactMarkers.set(impact.id, { leafletMarker: marker, glMarker });
+    // Auto-expire after 20 minutes
+    const timeout = setTimeout(() => removeImpact(impact.id), IMPACT_DISPLAY_LIFETIME);
+
+    impactMarkers.set(impact.id, { leafletMarker: marker, glMarker, timeout });
   }
 
   function removeImpact(id) {
@@ -661,6 +668,7 @@ const AlertMap = (function () {
     if (!entry) return;
     map.removeLayer(entry.leafletMarker);
     if (entry.glMarker) entry.glMarker.remove();
+    if (entry.timeout) clearTimeout(entry.timeout);
     impactMarkers.delete(id);
   }
 

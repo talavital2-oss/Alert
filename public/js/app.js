@@ -286,12 +286,14 @@
   fetchPreAlerts(); // initial fetch
 
   // ── Impact tracking (Telegram missile impact reports) ──
-  // After an alert, wait 5-10 minutes then fetch impact data from Telegram
-  let lastAlertTimes = [];        // timestamps of recent alert events
+  // Start catching 2 min after red alerts, poll for 10 min
+  // Display blue dots immediately when received, keep for 20 min
+  let lastAlertTimes = [];
   let impactPollTimer = null;
-  let currentImpactIds = new Set();
+  let impactPollingInterval = null;
+  let impactPollingStop = null;
 
-  // Called when new alerts arrive — record the timestamp for impact correlation
+  // Called when new alerts arrive — schedule impact fetching 2 min later
   function recordAlertTime(events) {
     if (!events || events.length === 0) return;
     const now = Date.now();
@@ -302,30 +304,26 @@
     const twoHoursAgo = now - 2 * 60 * 60 * 1000;
     lastAlertTimes = lastAlertTimes.filter(t => t > twoHoursAgo);
 
-    // Schedule impact fetch 5 minutes after this alert
+    // Schedule impact fetch 2 minutes after this alert
     if (!impactPollTimer) {
       impactPollTimer = setTimeout(() => {
         impactPollTimer = null;
         fetchImpacts();
-        // Continue polling every 60s for 25 more minutes
         startImpactPolling();
-      }, 5 * 60 * 1000); // 5 minutes
+      }, 2 * 60 * 1000);
     }
   }
 
-  let impactPollingInterval = null;
-  let impactPollingStop = null;
-
   function startImpactPolling() {
     if (impactPollingInterval) return;
-    impactPollingInterval = setInterval(fetchImpacts, 60000); // every 60s
-    // Stop polling after 25 more minutes (total ~30 min window)
+    impactPollingInterval = setInterval(fetchImpacts, 30000); // every 30s
+    // Stop polling after 10 minutes
     impactPollingStop = setTimeout(() => {
       if (impactPollingInterval) {
         clearInterval(impactPollingInterval);
         impactPollingInterval = null;
       }
-    }, 25 * 60 * 1000);
+    }, 10 * 60 * 1000);
   }
 
   async function fetchImpacts() {
@@ -337,32 +335,12 @@
 
       if (impacts.length === 0) return;
 
-      // Filter: only show impacts whose timestamp is within a relevant window
-      // of a known alert (alertTime - 2min to alertTime + 30min)
-      const relevant = impacts.filter(imp => {
-        return lastAlertTimes.some(alertTime => {
-          const diff = imp.timeMs - alertTime;
-          return diff > -2 * 60 * 1000 && diff < 30 * 60 * 1000;
-        });
-      });
-
-      if (relevant.length === 0) return;
-
-      // Remove old impact markers that are no longer in the data
-      const newIds = new Set(relevant.map(i => i.id));
-      for (const oldId of currentImpactIds) {
-        if (!newIds.has(oldId)) {
-          AlertMap.removeImpact(oldId);
-        }
-      }
-
-      // Add new impact markers
-      for (const impact of relevant) {
+      // Display all impacts immediately — no client-side time filtering
+      for (const impact of impacts) {
         AlertMap.addImpact(impact);
       }
-      currentImpactIds = newIds;
 
-      console.log(`[Impacts] ${relevant.length} impact locations from Telegram`);
+      console.log(`[Impacts] ${impacts.length} impact locations from Telegram`);
     } catch (e) {
       // Silently handle fetch errors
     }
