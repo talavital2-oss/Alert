@@ -210,7 +210,7 @@ app.get('/api/alerts/current', async (req, res) => {
       fetchJson('https://api.tzevaadom.co.il/alerts-history', 5000)
     ]);
 
-    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+    const tenMinAgo = Date.now() - 10 * 60 * 1000;
     const seenEventIds = new Set();
     let allPerCity = [];
 
@@ -228,7 +228,7 @@ app.get('/api/alerts/current', async (req, res) => {
       const recent = historyResult.value.filter(entry => {
         if (seenEventIds.has(entry.id)) return false;
         const alerts = entry.alerts || [];
-        return alerts.some(a => a.time && (a.time * 1000) > fiveMinAgo);
+        return alerts.some(a => a.time && (a.time * 1000) > tenMinAgo);
       });
       const histPerCity = processTzevaadomAlerts(recent);
       allPerCity = [...allPerCity, ...histPerCity];

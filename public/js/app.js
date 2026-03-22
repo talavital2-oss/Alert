@@ -361,14 +361,14 @@
     updateAlertCounts();
   }
 
-  // Handle clear
+  // Handle clear — don't remove map markers, let them expire naturally via their own timeouts
   function handleClear() {
-    AlertMap.clearAll();
     updateAlertCounts();
   }
 
-  // Update relative times every 30 seconds
+  // Update relative times every 10 seconds
   setInterval(() => {
+    if (activeSection !== 'alerts') return;
     const cards = alertList.querySelectorAll('.alert-card');
     cards.forEach((card, i) => {
       if (i < eventHistory.length) {
@@ -382,7 +382,8 @@
         }
       }
     });
-  }, 30000);
+    updateAlertCounts();
+  }, 10000);
 
   // Initialize alert service
   AlertService.init({
