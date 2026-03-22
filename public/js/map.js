@@ -98,9 +98,14 @@ const AlertMap = (function () {
 
   // ── MapLibre GL 3D styles (free, no API key) ──
   const glStyles = [
+    { id: 'gl-carto-dark', name: '3D CARTO Dark', theme: 'dark', styleUrl: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json' },
     { id: 'gl-3d-liberty', name: '3D Liberty', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/liberty' },
+    { id: 'gl-3d-dark', name: '3D Liberty Dark', theme: 'dark', styleUrl: 'https://tiles.openfreemap.org/styles/dark' },
+    { id: 'gl-3d-fiord', name: '3D Fiord', theme: 'dark', styleUrl: 'https://tiles.openfreemap.org/styles/fiord' },
     { id: 'gl-3d-bright', name: '3D Bright', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/bright' },
-    { id: 'gl-3d-positron', name: '3D Positron', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/positron' }
+    { id: 'gl-3d-positron', name: '3D Positron', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/positron' },
+    { id: 'gl-carto-positron', name: '3D CARTO Light', theme: 'light', styleUrl: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json' },
+    { id: 'gl-carto-voyager', name: '3D CARTO Voyager', theme: 'light', styleUrl: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json' }
   ];
 
   // All styles for the dropdown
@@ -181,8 +186,14 @@ const AlertMap = (function () {
     const style = glMap.getStyle();
     if (!style || !style.layers) return;
 
-    // Remove existing 3d-buildings layer if present
+    // Skip if we already added our layer
     if (glMap.getLayer('3d-buildings')) return;
+
+    // Skip if the style already has a fill-extrusion building layer (e.g. Liberty's 'building-3d')
+    const existingExtrusion = style.layers.find(l =>
+      l.type === 'fill-extrusion' && (l['source-layer'] === 'building' || (l.id && l.id.includes('building')))
+    );
+    if (existingExtrusion) return;
 
     // Find a suitable source with building data
     // OpenFreeMap uses openmaptiles schema — building data is in the 'building' source-layer
@@ -402,6 +413,9 @@ const AlertMap = (function () {
     const id = alert.id;
     if (markers.has(id)) removeMarker(id);
 
+    // Remove any pre-alert markers near this real alert (within ~10km)
+    clearNearbyPreAlerts(alert.lat, alert.lng);
+
     const color = alertColors[alert.type] || alertColors.general;
 
     // Leaflet marker
@@ -582,7 +596,8 @@ const AlertMap = (function () {
   }
 
   // ── Impact markers (blue dots from Telegram reports) ──
-  const impactMarkers = new Map(); // id -> { leafletMarker, glMarker, tooltip }
+  const impactMarkers = new Map(); // id -> { leafletMarker, glMarker, timeout }
+  const IMPACT_DISPLAY_LIFETIME = 20 * 60 * 1000; // 20 minutes
 
   function createImpactGLEl() {
     const el = document.createElement('div');
@@ -610,17 +625,19 @@ const AlertMap = (function () {
       className: 'impact-label'
     });
 
-    // Popup with full message text on click
+    // Popup with full message text + dismiss button
     const timeStr = new Date(impact.timeMs).toLocaleTimeString('he-IL', {
       hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem'
     });
-    marker.bindPopup(`
+    const popupHtml = `
       <div class="popup-content" style="direction:rtl;text-align:right;max-width:220px;">
         <div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px;">📍 ${impact.location}</div>
         <div style="font-size:12px;color:#d1d5db;line-height:1.4;margin-bottom:6px;">${impact.text}</div>
-        <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">${timeStr}</div>
+        <button onclick="AlertMap.removeImpact('${impact.id}')" style="background:#374151;color:#f9fafb;border:1px solid #4b5563;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;width:100%;">סגור</button>
       </div>
-    `, { className: 'alert-popup', maxWidth: 260 });
+    `;
+    marker.bindPopup(popupHtml, { className: 'alert-popup', maxWidth: 260 });
 
     // GL marker (if 3D mode)
     let glMarker = null;
@@ -630,7 +647,8 @@ const AlertMap = (function () {
         <div style="direction:rtl;text-align:right;padding:4px;">
           <div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px;">📍 ${impact.location}</div>
           <div style="font-size:12px;color:#d1d5db;line-height:1.4;margin-bottom:6px;">${impact.text}</div>
-          <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+          <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">${timeStr}</div>
+          <button onclick="AlertMap.removeImpact('${impact.id}')" style="background:#374151;color:#f9fafb;border:1px solid #4b5563;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;width:100%;">סגור</button>
         </div>
       `);
       glMarker = new maplibregl.Marker({ element: el })
@@ -639,7 +657,10 @@ const AlertMap = (function () {
         .addTo(glMap);
     }
 
-    impactMarkers.set(impact.id, { leafletMarker: marker, glMarker });
+    // Auto-expire after 20 minutes
+    const timeout = setTimeout(() => removeImpact(impact.id), IMPACT_DISPLAY_LIFETIME);
+
+    impactMarkers.set(impact.id, { leafletMarker: marker, glMarker, timeout });
   }
 
   function removeImpact(id) {
@@ -647,6 +668,7 @@ const AlertMap = (function () {
     if (!entry) return;
     map.removeLayer(entry.leafletMarker);
     if (entry.glMarker) entry.glMarker.remove();
+    if (entry.timeout) clearTimeout(entry.timeout);
     impactMarkers.delete(id);
   }
 
@@ -655,5 +677,108 @@ const AlertMap = (function () {
   }
 
 
-  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts };
+  // ── Pre-Alert markers (amber dots — predicted areas, Category 14) ──
+  const preAlertMarkers = new Map(); // id -> { leafletMarker, glMarker, timeout, lat, lng }
+  const PRE_ALERT_COLOR = '#f59e0b'; // amber
+
+  // Remove pre-alert markers near a given coordinate (real alert replaces prediction)
+  function clearNearbyPreAlerts(lat, lng, radiusKm = 10) {
+    const toRemove = [];
+    for (const [id, entry] of preAlertMarkers) {
+      if (!entry.lat || !entry.lng) continue;
+      const dist = haversineKm(lat, lng, entry.lat, entry.lng);
+      if (dist <= radiusKm) {
+        toRemove.push(id);
+      }
+    }
+    for (const id of toRemove) {
+      removePreAlert(id);
+    }
+  }
+
+  // Haversine distance in km between two lat/lng points
+  function haversineKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+  const PRE_ALERT_LIFETIME = 10 * 60 * 1000; // 10 minutes
+
+  function addPreAlert(preAlert) {
+    if (!preAlert.lat || !preAlert.lng) return;
+    const id = preAlert.id;
+    if (preAlertMarkers.has(id)) return; // already shown
+
+    // Leaflet — transparent yellow overlay circle (radius in meters)
+    const overlay = L.circle([preAlert.lat, preAlert.lng], {
+      radius: 1500, // 1.5km radius
+      color: 'rgba(245, 158, 11, 0.4)',
+      fillColor: 'rgba(245, 158, 11, 0.15)',
+      fillOpacity: 0.15,
+      weight: 1,
+      opacity: 0.4,
+      interactive: true
+    }).addTo(map);
+
+    // Popup on click only (no permanent label)
+    const timeStr = new Date(preAlert.timeMs).toLocaleTimeString('he-IL', {
+      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem'
+    });
+    overlay.bindPopup(`
+      <div class="popup-content" style="direction:rtl;text-align:center;max-width:220px;">
+        <div style="font-size:14px;font-weight:700;color:${PRE_ALERT_COLOR};margin-bottom:4px;">⚠️ צפי להתרעות</div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:4px;">${preAlert.region}</div>
+        <div style="font-size:12px;color:#d1d5db;line-height:1.4;margin-bottom:6px;">${preAlert.title}</div>
+        <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+      </div>
+    `, { className: 'alert-popup', maxWidth: 260 });
+
+    // GL overlay — use a transparent yellow circle div
+    let glMarker = null;
+    if (useGL && glMap) {
+      const el = document.createElement('div');
+      el.style.cssText = 'width:60px;height:60px;border-radius:50%;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);cursor:pointer;';
+      const popup = new maplibregl.Popup({ offset: 12, maxWidth: '260px' }).setHTML(`
+        <div style="direction:rtl;text-align:center;padding:4px;">
+          <div style="font-size:14px;font-weight:700;color:${PRE_ALERT_COLOR};margin-bottom:4px;">⚠️ צפי להתרעות</div>
+          <div style="font-size:16px;font-weight:700;margin-bottom:4px;">${preAlert.region}</div>
+          <div style="font-size:12px;color:#d1d5db;">${preAlert.title}</div>
+          <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+        </div>
+      `);
+      glMarker = new maplibregl.Marker({ element: el })
+        .setLngLat([preAlert.lng, preAlert.lat])
+        .setPopup(popup)
+        .addTo(glMap);
+    }
+
+    // Auto-expire
+    const remainingMs = Math.max(0, (preAlert.expiresAt || (preAlert.timeMs + PRE_ALERT_LIFETIME)) - Date.now());
+    const timeout = setTimeout(() => removePreAlert(id), remainingMs);
+
+    preAlertMarkers.set(id, { leafletMarker: overlay, glMarker, timeout, lat: preAlert.lat, lng: preAlert.lng });
+  }
+
+  function removePreAlert(id) {
+    const entry = preAlertMarkers.get(id);
+    if (!entry) return;
+    map.removeLayer(entry.leafletMarker);
+    if (entry.glMarker) entry.glMarker.remove();
+    clearTimeout(entry.timeout);
+    preAlertMarkers.delete(id);
+  }
+
+  function clearPreAlerts() {
+    for (const [id] of preAlertMarkers) removePreAlert(id);
+  }
+
+  function getPreAlertCount() {
+    return preAlertMarkers.size;
+  }
+
+  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount };
 })();
