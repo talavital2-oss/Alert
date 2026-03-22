@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="css/style.css?v=4">
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
   <!-- Status Bar -->
@@ -80,6 +80,11 @@
         <span class="menu-item-label">היסטוריית פגיעות</span>
         <span class="menu-item-desc">Impact history — last 12 hours</span>
       </button>
+      <button class="menu-item" data-section="stats">
+        <span class="menu-item-icon">📊</span>
+        <span class="menu-item-label">סטטיסטיקות</span>
+        <span class="menu-item-desc">Statistics — last 24 hours</span>
+      </button>
     </div>
   </div>
 
@@ -95,6 +100,7 @@
     </div>
     <div id="alert-list"></div>
     <div id="impact-list" class="hidden"></div>
+    <div id="stats-panel" class="hidden"></div>
     <div id="no-alerts" class="no-alerts">
       <div class="no-alerts-icon">✓</div>
       <p>אין התרעות פעילות</p>
@@ -114,9 +120,9 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 
   <!-- App Modules -->
-  <script src="js/sounds.js?v=4"></script>
-  <script src="js/map.js?v=4"></script>
-  <script src="js/alerts.js?v=4"></script>
-  <script src="js/app.js?v=4"></script>
+  <script src="js/sounds.js?v=5"></script>
+  <script src="js/map.js?v=5"></script>
+  <script src="js/alerts.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
 </body>
 </html>

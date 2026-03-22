@@ -10,6 +10,7 @@
   const panelTitle = document.getElementById('panel-title');
   const alertList = document.getElementById('alert-list');
   const impactList = document.getElementById('impact-list');
+  const statsPanel = document.getElementById('stats-panel');
   const noAlerts = document.getElementById('no-alerts');
   const noImpacts = document.getElementById('no-impacts');
   const soundToggle = document.getElementById('sound-toggle');
@@ -75,19 +76,27 @@
     // Clear any impact history markers from map
     clearImpactHistoryMarkers();
 
+    // Hide all sections first
+    alertList.classList.add('hidden');
+    impactList.classList.add('hidden');
+    statsPanel.classList.add('hidden');
+    noAlerts.style.display = 'none';
+    noImpacts.classList.add('hidden');
+
     if (section === 'alerts') {
       panelTitle.textContent = 'התרעות אחרונות';
       alertList.classList.remove('hidden');
-      impactList.classList.add('hidden');
-      noImpacts.classList.add('hidden');
       noAlerts.style.display = eventHistory.length === 0 ? '' : 'none';
       updateAlertCounts();
     } else if (section === 'impacts') {
       panelTitle.textContent = 'היסטוריית פגיעות';
-      alertList.classList.add('hidden');
-      noAlerts.style.display = 'none';
       impactList.classList.remove('hidden');
       loadImpactHistory();
+    } else if (section === 'stats') {
+      panelTitle.textContent = 'סטטיסטיקות';
+      panelAlertCount.textContent = '';
+      statsPanel.classList.remove('hidden');
+      loadStats();
     }
 
     // Open panel if closed
@@ -185,6 +194,127 @@
       AlertMap.removeImpact(id);
     }
     impactHistoryMarkers = [];
+  }
+
+  // ── Statistics ──
+  async function loadStats() {
+    statsPanel.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-dim);">טוען סטטיסטיקות...</div>';
+
+    try {
+      const res = await fetch('/api/stats');
+      if (!res.ok) throw new Error('Failed');
+      const stats = await res.json();
+      if (stats.error) throw new Error(stats.error);
+
+      panelAlertCount.textContent = `${stats.timeRange.spanHours.toFixed(0)} שעות אחרונות`;
+      renderStats(stats);
+    } catch (e) {
+      statsPanel.innerHTML = '<div style="text-align:center;padding:20px;color:var(--red-alert);">שגיאה בטעינת נתונים</div>';
+    }
+  }
+
+  function renderStats(stats) {
+    const ISR = 'Asia/Jerusalem';
+    let html = '';
+
+    // Summary cards
+    html += `<div class="stats-summary">
+      <div class="stats-card">
+        <div class="stats-card-value">${stats.totalAlerts.toLocaleString()}</div>
+        <div class="stats-card-label">התרעות</div>
+      </div>
+      <div class="stats-card">
+        <div class="stats-card-value">${stats.totalEvents}</div>
+        <div class="stats-card-label">אירועים</div>
+      </div>
+      <div class="stats-card">
+        <div class="stats-card-value">${stats.uniqueCities}</div>
+        <div class="stats-card-label">יישובים</div>
+      </div>
+      <div class="stats-card">
+        <div class="stats-card-value">${stats.timeRange.spanHours.toFixed(0)}h</div>
+        <div class="stats-card-label">טווח זמן</div>
+      </div>
+    </div>`;
+
+    // Alert type breakdown
+    html += '<div class="stats-section"><div class="stats-section-title">סוג התרעה</div>';
+    const maxTypeCount = stats.typeBreakdown.length > 0 ? stats.typeBreakdown[0].count : 1;
+    const typeColors = {
+      'ירי רקטות וטילים': 'var(--red-alert)',
+      'חדירת כלי טיס עוין': 'var(--orange-alert)',
+      'חדירת מחבלים': '#f59e0b',
+      'רעידת אדמה': 'var(--blue-alert)',
+    };
+    for (const t of stats.typeBreakdown) {
+      const pct = ((t.count / maxTypeCount) * 100).toFixed(0);
+      const color = typeColors[t.type] || 'var(--text-dim)';
+      html += `<div class="stats-type-row">
+        <span class="stats-type-name">${t.type}</span>
+        <span class="stats-type-count">${t.count}</span>
+      </div>
+      <div class="stats-type-bar" style="width:${pct}%;background:${color};"></div>`;
+    }
+    html += '</div>';
+
+    // Timeline
+    if (stats.timeline.length > 0) {
+      html += '<div class="stats-section"><div class="stats-section-title">ציר זמן (לפי שעה)</div>';
+      const maxHourly = Math.max(...stats.timeline.map(t => t.count));
+      html += '<div class="stats-timeline">';
+      for (const t of stats.timeline) {
+        const heightPct = maxHourly > 0 ? ((t.count / maxHourly) * 100).toFixed(0) : 0;
+        const hourLabel = t.hour.split(' ')[1] || '';
+        html += `<div class="stats-timeline-bar" style="height:${heightPct}%;" title="${hourLabel} — ${t.count} התרעות"></div>`;
+      }
+      html += '</div>';
+      // Labels — first and last hour
+      const firstHour = stats.timeline[0].hour.split(' ')[1];
+      const lastHour = stats.timeline[stats.timeline.length - 1].hour.split(' ')[1];
+      html += `<div class="stats-timeline-labels"><span>${firstHour}</span><span>${lastHour}</span></div>`;
+      html += '</div>';
+    }
+
+    // Top areas
+    if (stats.topAreas.length > 0) {
+      html += '<div class="stats-section"><div class="stats-section-title">אזורים</div>';
+      for (const a of stats.topAreas.slice(0, 15)) {
+        html += `<div class="stats-area-row">
+          <span class="stats-area-name">${a.area}</span>
+          <span class="stats-area-count">${a.count}</span>
+        </div>`;
+      }
+      html += '</div>';
+    }
+
+    // Top cities
+    html += '<div class="stats-section"><div class="stats-section-title">יישובים מותקפים</div>';
+    for (let i = 0; i < Math.min(stats.topCities.length, 30); i++) {
+      const c = stats.topCities[i];
+      const lastTimeStr = c.lastTime ? new Date(c.lastTime * 1000).toLocaleTimeString('he-IL', {
+        hour: '2-digit', minute: '2-digit', timeZone: ISR_TZ
+      }) : '';
+      html += `<div class="stats-city-row" data-city="${c.city}">
+        <span class="stats-city-rank">${i + 1}</span>
+        <span class="stats-city-name">${c.city}</span>
+        <span class="stats-city-time">${lastTimeStr}</span>
+        <span class="stats-city-count">${c.count}</span>
+      </div>`;
+    }
+    html += '</div>';
+
+    statsPanel.innerHTML = html;
+
+    // Click city to fly to it on map
+    statsPanel.querySelectorAll('.stats-city-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const cityName = row.dataset.city;
+        const cityData = AlertService.getCities()[cityName];
+        if (cityData && cityData.lat && cityData.lng) {
+          AlertMap.panTo(cityData.lat, cityData.lng, 13);
+        }
+      });
+    });
   }
 
   // Sound toggle

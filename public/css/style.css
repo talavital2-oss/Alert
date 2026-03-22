@@ -814,6 +814,173 @@ html, body {
   color: #60a5fa;
 }
 
+/* ===== Statistics Panel ===== */
+.stats-section {
+  margin-bottom: 16px;
+}
+
+.stats-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 4px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.stats-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.stats-card {
+  background: rgba(26, 34, 54, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+}
+
+.stats-card-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.stats-card-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.stats-type-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 4px;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.5);
+}
+
+.stats-type-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.stats-type-count {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-type-bar {
+  height: 4px;
+  border-radius: 2px;
+  margin-top: 4px;
+  transition: width 0.3s;
+}
+
+.stats-city-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.3);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.stats-city-row:hover {
+  background: var(--bg-card);
+}
+
+.stats-city-rank {
+  font-size: 11px;
+  color: var(--text-dim);
+  width: 24px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-city-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  flex: 1;
+  margin: 0 8px;
+}
+
+.stats-city-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--red-alert);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-city-time {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+/* Timeline chart */
+.stats-timeline {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 80px;
+  padding: 4px 0;
+}
+
+.stats-timeline-bar {
+  flex: 1;
+  min-width: 4px;
+  background: var(--red-alert);
+  border-radius: 2px 2px 0 0;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+  position: relative;
+}
+
+.stats-timeline-bar:hover {
+  opacity: 1;
+}
+
+.stats-timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-dim);
+  padding-top: 4px;
+}
+
+.stats-area-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.3);
+}
+
+.stats-area-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.stats-area-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--orange-alert);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ===== Pre-Alert Markers (amber — predicted areas) ===== */
 .pre-alert-label {
   background: rgba(245, 158, 11, 0.85) !important;

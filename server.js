@@ -246,6 +246,121 @@ app.get('/api/alerts/current', async (req, res) => {
   }
 });
 
+// Statistics — aggregated alert data from tzevaadom history
+let statsCache = { time: 0, data: null };
+const STATS_CACHE_TTL = 60000; // 1 minute cache
+
+app.get('/api/stats', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (statsCache.data && now - statsCache.time < STATS_CACHE_TTL) {
+      return res.json(statsCache.data);
+    }
+
+    const data = await fetchJson('https://api.tzevaadom.co.il/alerts-history');
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({ error: 'no_data' });
+    }
+
+    // Aggregate stats
+    const cityCounts = {};    // city -> { count, lastTime, threat }
+    const areaCounts = {};    // area -> count
+    const typeCounts = {};    // threat type -> count
+    const hourly = {};        // "YYYY-MM-DD HH" -> count
+    let totalAlerts = 0;
+    let oldestTime = Infinity;
+    let newestTime = 0;
+
+    for (const entry of data) {
+      const alerts = entry.alerts || [];
+      for (const alert of alerts) {
+        const time = alert.time || 0;
+        const threat = alert.threat !== undefined ? alert.threat : 0;
+        const alertCities = alert.cities || [];
+        const isDrill = alert.isDrill || false;
+
+        if (isDrill) continue;
+
+        // Type counts
+        const typeName = threatToTitle(threat);
+        typeCounts[typeName] = (typeCounts[typeName] || 0) + alertCities.length;
+
+        // Time tracking
+        if (time < oldestTime) oldestTime = time;
+        if (time > newestTime) newestTime = time;
+
+        // Hourly breakdown
+        const d = new Date(time * 1000);
+        const hourKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:00`;
+        hourly[hourKey] = (hourly[hourKey] || 0) + alertCities.length;
+
+        for (const cityName of alertCities) {
+          totalAlerts++;
+          // City counts
+          if (!cityCounts[cityName]) {
+            cityCounts[cityName] = { count: 0, lastTime: 0, threat: typeName };
+          }
+          cityCounts[cityName].count++;
+          if (time > cityCounts[cityName].lastTime) {
+            cityCounts[cityName].lastTime = time;
+            cityCounts[cityName].threat = typeName;
+          }
+
+          // Area — look up in cities data
+          const cityData = cities[cityName];
+          if (cityData && cityData.area) {
+            areaCounts[cityData.area] = (areaCounts[cityData.area] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    // Sort cities by count descending
+    const topCities = Object.entries(cityCounts)
+      .map(([city, data]) => ({ city, ...data }))
+      .sort((a, b) => b.count - a.count);
+
+    // Sort areas by count descending
+    const topAreas = Object.entries(areaCounts)
+      .map(([area, count]) => ({ area, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Sort types by count descending
+    const typeBreakdown = Object.entries(typeCounts)
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Hourly timeline sorted chronologically
+    const timeline = Object.entries(hourly)
+      .map(([hour, count]) => ({ hour, count }))
+      .sort((a, b) => a.hour.localeCompare(b.hour));
+
+    const spanHours = oldestTime < Infinity ? ((newestTime - oldestTime) / 3600).toFixed(1) : 0;
+
+    const result = {
+      totalAlerts,
+      totalEvents: data.length,
+      uniqueCities: Object.keys(cityCounts).length,
+      timeRange: {
+        oldest: oldestTime < Infinity ? new Date(oldestTime * 1000).toISOString() : null,
+        newest: newestTime > 0 ? new Date(newestTime * 1000).toISOString() : null,
+        spanHours: parseFloat(spanHours)
+      },
+      topCities: topCities.slice(0, 50),
+      topAreas,
+      typeBreakdown,
+      timeline,
+      generatedAt: new Date().toISOString()
+    };
+
+    statsCache = { time: now, data: result };
+    res.json(result);
+  } catch (e) {
+    console.error('Stats error:', e.message);
+    res.json({ error: e.message });
+  }
+});
+
 // Alert history via tzevaadom (NOT geo-blocked)
 // Returns grouped events sorted newest-first
 app.get('/api/alerts/history-proxy', async (req, res) => {
