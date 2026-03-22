@@ -7,16 +7,26 @@
   const statusText = connectionStatus.querySelector('.status-text');
   const alertCountBadge = document.getElementById('alert-count');
   const panelAlertCount = document.getElementById('panel-alert-count');
+  const panelTitle = document.getElementById('panel-title');
   const alertList = document.getElementById('alert-list');
+  const impactList = document.getElementById('impact-list');
   const noAlerts = document.getElementById('no-alerts');
+  const noImpacts = document.getElementById('no-impacts');
   const soundToggle = document.getElementById('sound-toggle');
   const soundIconOff = document.getElementById('sound-icon-off');
   const soundIconOn = document.getElementById('sound-icon-on');
   const panelToggle = document.getElementById('panel-toggle');
   const alertPanel = document.getElementById('alert-panel');
+  const menuToggle = document.getElementById('menu-toggle');
+  const menuOverlay = document.getElementById('menu-overlay');
+  const menuDrawer = document.getElementById('menu-drawer');
+  const menuClose = document.getElementById('menu-close');
+  const menuItems = document.querySelectorAll('.menu-item');
 
   let eventHistory = []; // array of event objects
   let knownEventIds = new Set(); // track event IDs to prevent duplicates
+  let activeSection = 'alerts'; // 'alerts' or 'impacts'
+  let impactHistoryMarkers = []; // temporary markers shown when clicking impact cards
 
   // Initialize map
   AlertMap.init();
@@ -34,6 +44,148 @@
     mapGl.style.right = rightVal;
     setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
   });
+
+  // ── Hamburger Menu ──
+  function openMenu() {
+    menuDrawer.classList.remove('menu-closed');
+    menuOverlay.classList.remove('hidden');
+  }
+  function closeMenu() {
+    menuDrawer.classList.add('menu-closed');
+    menuOverlay.classList.add('hidden');
+  }
+  menuToggle.addEventListener('click', openMenu);
+  menuClose.addEventListener('click', closeMenu);
+  menuOverlay.addEventListener('click', closeMenu);
+
+  // Menu section switching
+  menuItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const section = item.dataset.section;
+      switchSection(section);
+      closeMenu();
+    });
+  });
+
+  function switchSection(section) {
+    activeSection = section;
+    // Update menu active state
+    menuItems.forEach(i => i.classList.toggle('active', i.dataset.section === section));
+
+    // Clear any impact history markers from map
+    clearImpactHistoryMarkers();
+
+    if (section === 'alerts') {
+      panelTitle.textContent = 'התרעות אחרונות';
+      alertList.classList.remove('hidden');
+      impactList.classList.add('hidden');
+      noImpacts.classList.add('hidden');
+      noAlerts.style.display = eventHistory.length === 0 ? '' : 'none';
+      updateAlertCounts();
+    } else if (section === 'impacts') {
+      panelTitle.textContent = 'היסטוריית פגיעות';
+      alertList.classList.add('hidden');
+      noAlerts.style.display = 'none';
+      impactList.classList.remove('hidden');
+      loadImpactHistory();
+    }
+
+    // Open panel if closed
+    if (alertPanel.classList.contains('panel-closed')) {
+      alertPanel.classList.remove('panel-closed');
+      alertPanel.classList.add('panel-open');
+      const rightVal = window.innerWidth <= 768 ? '0' : 'var(--panel-width)';
+      document.getElementById('map').style.right = rightVal;
+      document.getElementById('map-gl').style.right = rightVal;
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
+    }
+  }
+
+  // Set initial active menu item
+  menuItems.forEach(i => i.classList.toggle('active', i.dataset.section === 'alerts'));
+
+  // ── Impact History ──
+  async function loadImpactHistory() {
+    impactList.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-dim);">טוען...</div>';
+    noImpacts.classList.add('hidden');
+
+    try {
+      const res = await fetch('/api/impacts/history');
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+      const impacts = data.impacts || [];
+
+      impactList.innerHTML = '';
+      if (impacts.length === 0) {
+        noImpacts.classList.remove('hidden');
+        panelAlertCount.textContent = '0 פגיעות';
+        return;
+      }
+
+      noImpacts.classList.add('hidden');
+      panelAlertCount.textContent = `${impacts.length} פגיעות`;
+
+      for (const impact of impacts) {
+        const card = createImpactCard(impact);
+        impactList.appendChild(card);
+      }
+    } catch (e) {
+      impactList.innerHTML = '<div style="text-align:center;padding:20px;color:var(--red-alert);">שגיאה בטעינת נתונים</div>';
+    }
+  }
+
+  function createImpactCard(impact) {
+    const card = document.createElement('div');
+    card.className = 'impact-card';
+    card.dataset.impactId = impact.id;
+
+    const timeStr = new Date(impact.timeMs).toLocaleTimeString('he-IL', {
+      hour: '2-digit', minute: '2-digit', timeZone: ISR_TZ
+    });
+    const relTime = formatRelativeTime(impact.timeMs);
+
+    // Truncate text for card display
+    const displayText = impact.text.length > 120 ? impact.text.substring(0, 120) + '...' : impact.text;
+
+    card.innerHTML = `
+      <div class="impact-card-header">
+        <span class="impact-card-location">📍 ${impact.location}</span>
+        <span class="impact-card-time">${relTime} (${timeStr})</span>
+      </div>
+      <div class="impact-card-text">${displayText}</div>
+    `;
+
+    // Click to show this impact on the map
+    card.addEventListener('click', () => {
+      // Toggle selection
+      const wasSelected = card.classList.contains('selected');
+      impactList.querySelectorAll('.impact-card').forEach(c => c.classList.remove('selected'));
+      clearImpactHistoryMarkers();
+
+      if (!wasSelected && impact.lat && impact.lng) {
+        card.classList.add('selected');
+        showImpactOnMap(impact);
+      }
+    });
+
+    return card;
+  }
+
+  function showImpactOnMap(impact) {
+    // Add a temporary blue dot on the map for this impact
+    AlertMap.addImpact(impact);
+    impactHistoryMarkers.push(impact.id);
+
+    // Pan to the impact location
+    AlertMap.panTo(impact.lat, impact.lng, 13);
+  }
+
+  function clearImpactHistoryMarkers() {
+    for (const id of impactHistoryMarkers) {
+      AlertMap.removeImpact(id);
+    }
+    impactHistoryMarkers = [];
+  }
 
   // Sound toggle
   soundToggle.addEventListener('click', () => {
@@ -209,14 +361,14 @@
     updateAlertCounts();
   }
 
-  // Handle clear
+  // Handle clear — don't remove map markers, let them expire naturally via their own timeouts
   function handleClear() {
-    AlertMap.clearAll();
     updateAlertCounts();
   }
 
-  // Update relative times every 30 seconds
+  // Update relative times every 10 seconds
   setInterval(() => {
+    if (activeSection !== 'alerts') return;
     const cards = alertList.querySelectorAll('.alert-card');
     cards.forEach((card, i) => {
       if (i < eventHistory.length) {
@@ -230,7 +382,8 @@
         }
       }
     });
-  }, 30000);
+    updateAlertCounts();
+  }, 10000);
 
   // Initialize alert service
   AlertService.init({
@@ -335,12 +488,22 @@
 
       if (impacts.length === 0) return;
 
-      // Display all impacts immediately — no client-side time filtering
-      for (const impact of impacts) {
+      // Only show impacts whose timestamp correlates with a known alert
+      // (alertTime - 2min to alertTime + 30min)
+      const relevant = impacts.filter(imp => {
+        return lastAlertTimes.some(alertTime => {
+          const diff = imp.timeMs - alertTime;
+          return diff > -2 * 60 * 1000 && diff < 30 * 60 * 1000;
+        });
+      });
+
+      if (relevant.length === 0) return;
+
+      for (const impact of relevant) {
         AlertMap.addImpact(impact);
       }
 
-      console.log(`[Impacts] ${impacts.length} impact locations from Telegram`);
+      console.log(`[Impacts] ${relevant.length} impact locations from Telegram`);
     } catch (e) {
       // Silently handle fetch errors
     }

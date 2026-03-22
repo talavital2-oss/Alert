@@ -14,7 +14,7 @@ const AlertMap = (function () {
   let currentStyleId = null;
   let styleControlContainer = null;
   const markers = new Map(); // alertId -> { marker, glMarker, timeout, data }
-  const MARKER_LIFETIME = 5 * 60 * 1000; // 5 minutes
+  const MARKER_LIFETIME = 10 * 60 * 1000; // 10 minutes
 
   const alertColors = {
     missiles: '#ef4444',
@@ -411,7 +411,9 @@ const AlertMap = (function () {
   function addAlert(alert) {
     if (!alert.lat || !alert.lng) return;
     const id = alert.id;
-    if (markers.has(id)) removeMarker(id);
+
+    // Skip if this marker already exists — don't reset the expiry timer
+    if (markers.has(id)) return;
 
     // Remove any pre-alert markers near this real alert (within ~10km)
     clearNearbyPreAlerts(alert.lat, alert.lng);
@@ -448,7 +450,10 @@ const AlertMap = (function () {
       glMarker = addGLMarker(id, alert.lat, alert.lng, color, glPopupHtml);
     }
 
-    const timeout = setTimeout(() => removeMarker(id), MARKER_LIFETIME);
+    // Expire based on alert's actual timestamp, not "now"
+    const alertAge = Date.now() - time.getTime();
+    const remainingMs = Math.max(0, MARKER_LIFETIME - alertAge);
+    const timeout = setTimeout(() => removeMarker(id), remainingMs);
     markers.set(id, { marker, glMarker, timeout, data: alert });
   }
 
@@ -492,11 +497,15 @@ const AlertMap = (function () {
     return markers.size;
   }
 
-  function panTo(lat, lng) {
+  function panTo(lat, lng, zoom) {
     if (useGL && glMap) {
-      glMap.flyTo({ center: [lng, lat], zoom: glMap.getZoom() });
+      glMap.flyTo({ center: [lng, lat], zoom: zoom || glMap.getZoom() });
     } else {
-      map.panTo([lat, lng], { animate: true });
+      if (zoom) {
+        map.flyTo([lat, lng], zoom, { animate: true });
+      } else {
+        map.panTo([lat, lng], { animate: true });
+      }
     }
   }
 
