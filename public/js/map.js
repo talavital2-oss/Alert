@@ -411,7 +411,9 @@ const AlertMap = (function () {
   function addAlert(alert) {
     if (!alert.lat || !alert.lng) return;
     const id = alert.id;
-    if (markers.has(id)) removeMarker(id);
+
+    // Skip if this marker already exists — don't reset the expiry timer
+    if (markers.has(id)) return;
 
     // Remove any pre-alert markers near this real alert (within ~10km)
     clearNearbyPreAlerts(alert.lat, alert.lng);
@@ -448,7 +450,10 @@ const AlertMap = (function () {
       glMarker = addGLMarker(id, alert.lat, alert.lng, color, glPopupHtml);
     }
 
-    const timeout = setTimeout(() => removeMarker(id), MARKER_LIFETIME);
+    // Expire based on alert's actual timestamp, not "now"
+    const alertAge = Date.now() - time.getTime();
+    const remainingMs = Math.max(0, MARKER_LIFETIME - alertAge);
+    const timeout = setTimeout(() => removeMarker(id), remainingMs);
     markers.set(id, { marker, glMarker, timeout, data: alert });
   }
 
