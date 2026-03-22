@@ -430,16 +430,113 @@ function isImpactRelated(text) {
   return IMPACT_KEYWORDS.some(kw => text.includes(kw));
 }
 
+// Hebrew single-letter prefixes that attach to words (ב=in, ה=the, ל=to, מ=from, ש=that, כ=like, ו=and, ד=of)
+const HEBREW_PREFIXES = 'בהלמשכוד';
+
+// City names that are also extremely common Hebrew words.
+// These produce false positives in news/report text and are excluded from impact matching.
+// "אזור"=area, "מגן"=shield, "נשר"=eagle, "גשר"=bridge, "חמד"=charm, "שחר"=dawn,
+// "מתן"=giving, "עומר"=sheaf, "רחוב"=street, "מצפה"=lookout, "חצור"=yard,
+// "אילת"=none(but common in phrases), "מסדה"=lineup, "חורה"=pale, "שמיר"=thorn,
+// "נועם"=pleasantness, "מאור"=light, "מעון"=dwelling, "חרות"=freedom, "חריש"=plowing,
+// "שורש"=root, "לפיד"=torch, "סולם"=ladder, "ברקת"=emerald, "גלעד"=monument,
+// "תומר"=palm tree, "דולב"=plane tree, "כרמל"=Carmel/vineyard, "ברוש"=cypress
+const AMBIGUOUS_CITY_NAMES = new Set([
+  'אזור', 'מגן', 'נשר', 'גשר', 'חמד', 'שחר', 'מתן', 'עומר', 'רחוב',
+  'מצפה', 'חצור', 'מסדה', 'חורה', 'שמיר', 'נועם', 'מאור', 'מעון', 'חרות',
+  'חריש', 'שורש', 'לפיד', 'סולם', 'ברקת', 'גלעד', 'תומר', 'דולב', 'כרמל',
+  'ברוש', 'גונן', 'חוסן', 'חזון', 'יבול', 'סער', 'עידן', 'שילה', 'איתן',
+  'גדות', 'מגדל', 'נחלה', 'קשת', 'רמות', 'עופר', 'דליה', 'הילה', 'גורן'
+]);
+
+// Check if a city name match at `index` in `text` sits on a real word boundary.
+// Allows Hebrew prefix letters (ב, ה, ל, etc.) before the match.
+function isHebrewWordBoundary(text, cityName, index) {
+  const hebrewCharRegex = /[\u0590-\u05FF]/;
+
+  // --- Check BEFORE the match ---
+  if (index > 0) {
+    const charBefore = text[index - 1];
+    if (hebrewCharRegex.test(charBefore)) {
+      // Hebrew char before — only OK if it's a single-letter prefix after a non-Hebrew boundary
+      if (HEBREW_PREFIXES.includes(charBefore)) {
+        if (index >= 2 && hebrewCharRegex.test(text[index - 2])) {
+          return false; // prefix is itself part of a longer word
+        }
+        // else: prefix after space/start — OK
+      } else {
+        return false; // city name is embedded inside a longer Hebrew word
+      }
+    }
+  }
+
+  // --- Check AFTER the match ---
+  const afterIndex = index + cityName.length;
+  if (afterIndex < text.length) {
+    const charAfter = text[afterIndex];
+    if (hebrewCharRegex.test(charAfter)) {
+      return false; // city name is a prefix of a longer word
+    }
+  }
+
+  return true;
+}
+
+// Find all word-boundary occurrences of `cityName` in `text`.
+// Returns true if at least one valid occurrence exists.
+function hasCityMatch(text, cityName) {
+  let start = 0;
+  while (true) {
+    const idx = text.indexOf(cityName, start);
+    if (idx === -1) return false;
+    if (isHebrewWordBoundary(text, cityName, idx)) return true;
+    start = idx + 1;
+  }
+}
+
+// Check if a city name appears in a location-indicating context
+// (near prepositions like ב, באזור, ליד, etc.)
+// For ambiguous names, requires stronger evidence (e.g., "ביישוב X", "בעיר X")
+function hasLocationContext(text, cityName) {
+  const escaped = cityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const notFollowedByHebrew = `(?![\\u0590-\\u05FF])`;
+
+  if (AMBIGUOUS_CITY_NAMES.has(cityName)) {
+    // Stricter patterns for ambiguous names — "ב+name" alone is not enough
+    // because "באזור" means "in the area of", not "in Azor"
+    const strictPatterns = [
+      new RegExp(`(?:ביישוב|בעיר|בקיבוץ|במושב|בכפר|ביישוב|בשכונת)\\s+${escaped}${notFollowedByHebrew}`),
+      new RegExp(`(?:יישוב|עיר|קיבוץ|מושב|כפר)\\s+${escaped}${notFollowedByHebrew}`),
+    ];
+    return strictPatterns.some(p => p.test(text));
+  }
+
+  const locationPatterns = [
+    new RegExp(`ב${escaped}${notFollowedByHebrew}`),                     // בחיפה
+    new RegExp(`(?:באזור|ליד|סמוך ל|אזור)\\s+${escaped}${notFollowedByHebrew}`), // באזור חיפה
+    new RegExp(`(?:^|\\n)\\s*${escaped}${notFollowedByHebrew}`, 'm'),    // city at start of line
+  ];
+  return locationPatterns.some(p => p.test(text));
+}
+
 // Extract locations from Hebrew impact message text
 function extractLocations(text) {
   const results = [];
 
-  // 1. Match known city names from cities.json (longest match first)
+  // 1. Match known city names with word-boundary awareness (longest match first)
+  //    Require minimum 4 characters to avoid matching common Hebrew words.
+  //    Ambiguous city names (common Hebrew words) require explicit location context.
   const matchedCities = [];
   for (const [cityName, cityData] of Object.entries(cities)) {
-    if (cityName.length >= 3 && text.includes(cityName)) {
-      matchedCities.push({ name: cityName, data: cityData });
-    }
+    if (cityName.length < 4) continue;
+    if (!hasCityMatch(text, cityName)) continue;
+
+    const inContext = hasLocationContext(text, cityName);
+
+    // Ambiguous names (common words) are ONLY accepted with explicit location context
+    if (AMBIGUOUS_CITY_NAMES.has(cityName) && !inContext) continue;
+
+    matchedCities.push({ name: cityName, data: cityData, contextScore: inContext ? 10 : 0 });
   }
   matchedCities.sort((a, b) => b.name.length - a.name.length);
 
@@ -450,7 +547,12 @@ function extractLocations(text) {
     if (!isSubstring) filtered.push(city);
   }
 
-  // 2. Extract street / neighborhood / area detail
+  // 2. If any cities have location-context matches, prefer ONLY those.
+  //    This avoids picking up incidental city-name mentions in the body.
+  const contextMatches = filtered.filter(c => c.contextScore > 0);
+  const bestMatches = contextMatches.length > 0 ? contextMatches : filtered;
+
+  // 3. Extract street / neighborhood / area detail
   let detail = '';
   const detailPatterns = [
     { regex: /(?:ב)?רחוב\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s+[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'רחוב' },
@@ -466,8 +568,8 @@ function extractLocations(text) {
     }
   }
 
-  // 3. Build location results
-  for (const city of filtered) {
+  // 4. Build location results (only from best matches)
+  for (const city of bestMatches) {
     results.push({
       name: detail ? `${city.name} - ${detail}` : city.name,
       lat: city.data.lat,
@@ -500,20 +602,41 @@ app.get('/api/impacts', async (req, res) => {
       m.timeMs > twoHoursAgo && isImpactRelated(m.text)
     );
 
-    // Extract locations
-    const impacts = [];
-    const seen = new Set();
+    // Extract locations and deduplicate by city + time window.
+    // Multiple Telegram messages about the same impact at the same city
+    // should produce only ONE map marker, using the latest message.
+    const DEDUP_WINDOW_MS = 30 * 60 * 1000; // 30-minute window
+    const cityImpactMap = new Map(); // key: cityName -> best impact
 
     for (const msg of impactMessages) {
       const locations = extractLocations(msg.text);
-      if (locations.length === 0) continue; // skip if we can't locate it
+      if (locations.length === 0) continue;
 
       for (const loc of locations) {
-        const key = `${msg.id}-${loc.city}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
+        const existing = cityImpactMap.get(loc.city);
+        if (existing) {
+          // Same city within the dedup window — keep the latest message
+          if (Math.abs(msg.timeMs - existing.timeMs) < DEDUP_WINDOW_MS) {
+            if (msg.timeMs > existing.timeMs) {
+              // Update to newer message
+              cityImpactMap.set(loc.city, {
+                id: `tg-${msg.id}-${loc.city}`,
+                messageId: msg.id,
+                text: msg.text.substring(0, 300),
+                location: loc.name,
+                city: loc.city,
+                detail: loc.detail,
+                lat: loc.lat,
+                lng: loc.lng,
+                timeMs: msg.timeMs,
+                timestamp: msg.datetime
+              });
+            }
+            continue; // deduplicated
+          }
+        }
 
-        impacts.push({
+        cityImpactMap.set(loc.city, {
           id: `tg-${msg.id}-${loc.city}`,
           messageId: msg.id,
           text: msg.text.substring(0, 300),
@@ -527,6 +650,8 @@ app.get('/api/impacts', async (req, res) => {
         });
       }
     }
+
+    const impacts = Array.from(cityImpactMap.values());
 
     telegramCache = { time: now, impacts };
     res.json({ impacts, cached: false });
