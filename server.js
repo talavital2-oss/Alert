@@ -335,7 +335,14 @@ function fetchOrefAlerts() {
 // ============================================================
 
 let telegramCache = { time: 0, impacts: [] };
-const TELEGRAM_CACHE_TTL = 60000; // 60-second cache
+const TELEGRAM_CACHE_TTL = 30000; // 30-second cache
+
+// Telegram channels to scrape for impact reports
+const TELEGRAM_CHANNELS = [
+  '/s/fireisrael7777',
+  '/s/aharonyediotoriginal',
+  '/s/Yair_Altman_channel14',
+];
 
 // Hebrew keywords indicating an actual impact / fall
 const IMPACT_KEYWORDS = [
@@ -429,6 +436,41 @@ function isImpactRelated(text) {
   if (EXCLUDE_PATTERNS.some(p => text.includes(p))) return false;
   return IMPACT_KEYWORDS.some(kw => text.includes(kw));
 }
+
+// Common Hebrew city abbreviations used in Telegram reports
+const CITY_ABBREVIATIONS = {
+  'פ"ת': 'פתח תקווה', 'פ״ת': 'פתח תקווה',
+  'ת"א': 'תל אביב - יפו', 'ת״א': 'תל אביב - יפו',
+  'ב"ש': 'באר שבע', 'ב״ש': 'באר שבע',
+  'ר"ג': 'רמת גן', 'ר״ג': 'רמת גן',
+  'ב"ב': 'בני ברק', 'ב״ב': 'בני ברק',
+  'ר"ל': 'ראשון לציון', 'ר״ל': 'ראשון לציון',
+  'ק"ש': 'קריית שמונה', 'ק״ש': 'קריית שמונה',
+  'כ"ס': 'כפר סבא', 'כ״ס': 'כפר סבא',
+  'ר"ע': 'ראש העין', 'ר״ע': 'ראש העין',
+  'ק"א': 'קריית אתא', 'ק״א': 'קריית אתא',
+  'ק"ב': 'קריית ביאליק', 'ק״ב': 'קריית ביאליק',
+  'ק"מ': 'קריית מוצקין', 'ק״מ': 'קריית מוצקין',
+  'ק"ג': 'קריית גת', 'ק״ג': 'קריית גת',
+  'ג"ש': 'גבעת שמואל', 'ג״ש': 'גבעת שמואל',
+  'ז"י': 'זכרון יעקב', 'ז״י': 'זכרון יעקב',
+};
+
+// Street/area prefixes — city names appearing AFTER these are street names, NOT city locations.
+// e.g., "רחוב יבנה" = Yavne Street, not the city Yavne
+const STREET_PREFIXES = ['רחוב', 'רח\'', 'שדרות', 'שד\'', 'סמטת', 'דרך', 'כיכר'];
+
+// Known area landmarks mapped to their city coordinates
+const AREA_LANDMARKS = {
+  'כיכר הבימה':    { lat: 32.0725, lng: 34.7797, city: 'תל אביב - כיכר הבימה' },
+  'כיכר רבין':     { lat: 32.0794, lng: 34.7808, city: 'תל אביב - כיכר רבין' },
+  'כיכר דיזנגוף':   { lat: 32.0775, lng: 34.7744, city: 'תל אביב - כיכר דיזנגוף' },
+  'נמל תל אביב':   { lat: 32.0972, lng: 34.7733, city: 'תל אביב - הנמל' },
+  'שוק הכרמל':     { lat: 32.0667, lng: 34.7700, city: 'תל אביב - שוק הכרמל' },
+  'תחנה מרכזית':   { lat: 32.0564, lng: 34.7714, city: 'תל אביב - תחנה מרכזית' },
+  'שדרות רוטשילד':  { lat: 32.0633, lng: 34.7747, city: 'תל אביב - רוטשילד' },
+  'אזור התעשייה':   { lat: 0, lng: 0, city: '' }, // generic, skip — needs city context
+};
 
 // Known landmarks (interchanges, junctions, highways) mapped to nearest city coordinates.
 // Telegram reports often reference road landmarks instead of city names.
@@ -545,19 +587,63 @@ function hasLocationContext(text, cityName) {
   return locationPatterns.some(p => p.test(text));
 }
 
+// Collect city names that appear after street prefixes (רחוב, שדרות, כיכר, etc.)
+// These are street names, NOT city references.
+function getStreetNameCities(text) {
+  const streetCities = new Set();
+  for (const prefix of STREET_PREFIXES) {
+    // Match: prefix + space + Hebrew word(s)
+    const regex = new RegExp(`${prefix}\\s+([\\u0590-\\u05FF][^\\s,\\.\\n]*(?:\\s+[\\u0590-\\u05FF][^\\s,\\.\\n]*)?)`, 'g');
+    let m;
+    while ((m = regex.exec(text)) !== null) {
+      const streetName = m[1].trim();
+      // If this street name matches a city name, mark it as a street reference
+      if (cities[streetName]) {
+        streetCities.add(streetName);
+      }
+    }
+  }
+  return streetCities;
+}
+
+// Expand city abbreviations in text (פ"ת → פתח תקווה, etc.)
+// Returns both the expanded text and a map of abbreviation → full city name found
+function expandAbbreviations(text) {
+  const found = new Map(); // abbrev → full name
+  let expanded = text;
+  for (const [abbrev, fullName] of Object.entries(CITY_ABBREVIATIONS)) {
+    if (text.includes(abbrev)) {
+      found.set(abbrev, fullName);
+      expanded = expanded.replace(new RegExp(abbrev.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), fullName);
+    }
+  }
+  return { expanded, found };
+}
+
 // Extract locations from Hebrew impact message text
 function extractLocations(text) {
   const results = [];
 
+  // 0. Expand abbreviations first (פ"ת → פתח תקווה)
+  const { expanded, found: abbreviationsFound } = expandAbbreviations(text);
+  const workingText = expanded;
+
+  // 0b. Identify city names used as street names (exclude from city matching)
+  const streetNameCities = getStreetNameCities(workingText);
+
   // 1. Match known city names with word-boundary awareness (longest match first)
   //    Require minimum 4 characters to avoid matching common Hebrew words.
   //    Ambiguous city names (common Hebrew words) require explicit location context.
+  //    City names that appear as street names are excluded.
   const matchedCities = [];
   for (const [cityName, cityData] of Object.entries(cities)) {
     if (cityName.length < 4) continue;
-    if (!hasCityMatch(text, cityName)) continue;
+    if (!hasCityMatch(workingText, cityName)) continue;
 
-    const inContext = hasLocationContext(text, cityName);
+    // Skip city names that are used as street names in this message
+    if (streetNameCities.has(cityName)) continue;
+
+    const inContext = hasLocationContext(workingText, cityName);
 
     // Ambiguous names (common words) are ONLY accepted with explicit location context
     if (AMBIGUOUS_CITY_NAMES.has(cityName) && !inContext) continue;
@@ -581,13 +667,13 @@ function extractLocations(text) {
   // 3. Extract street / neighborhood / area detail
   let detail = '';
   const detailPatterns = [
-    { regex: /(?:ב)?רחוב\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s+[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'רחוב' },
-    { regex: /(?:ב)?שכונת\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s+[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'שכונת' },
-    { regex: /(?:ב)?אזור\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s+[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'אזור' },
+    { regex: /(?:ב)?רחוב\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'רחוב' },
+    { regex: /(?:ב)?שכונת\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'שכונת' },
+    { regex: /(?:ב)?אזור\s+([\u0590-\u05FF][^\s,\.\n]*(?:\s[\u0590-\u05FF][^\s,\.\n]*)?)/, prefix: 'אזור' },
   ];
 
   for (const p of detailPatterns) {
-    const m = text.match(p.regex);
+    const m = workingText.match(p.regex);
     if (m) {
       detail = `${p.prefix} ${m[1].trim()}`;
       break;
@@ -605,10 +691,10 @@ function extractLocations(text) {
     });
   }
 
-  // 5. If no city matched, try landmark references (interchanges, junctions)
+  // 5. If no city matched, try area landmarks (כיכר הבימה, etc.)
   if (results.length === 0) {
-    for (const [landmark, coords] of Object.entries(LANDMARK_LOCATIONS)) {
-      if (text.includes(landmark)) {
+    for (const [landmark, coords] of Object.entries(AREA_LANDMARKS)) {
+      if (coords.lat && workingText.includes(landmark)) {
         results.push({
           name: coords.city,
           lat: coords.lat,
@@ -616,7 +702,23 @@ function extractLocations(text) {
           city: coords.city,
           detail: ''
         });
-        break; // take the first (most specific) landmark match
+        break;
+      }
+    }
+  }
+
+  // 6. If still no match, try road landmarks (interchanges, junctions)
+  if (results.length === 0) {
+    for (const [landmark, coords] of Object.entries(LANDMARK_LOCATIONS)) {
+      if (workingText.includes(landmark)) {
+        results.push({
+          name: coords.city,
+          lat: coords.lat,
+          lng: coords.lng,
+          city: coords.city,
+          detail: ''
+        });
+        break;
       }
     }
   }
@@ -634,9 +736,16 @@ app.get('/api/impacts', async (req, res) => {
       return res.json({ impacts: telegramCache.impacts, cached: true });
     }
 
-    // Fetch and parse Telegram channel
-    const html = await fetchRawHTML('t.me', '/s/fireisrael7777');
-    const messages = parseTelegramHTML(html);
+    // Fetch and parse all Telegram channels in parallel
+    const channelResults = await Promise.allSettled(
+      TELEGRAM_CHANNELS.map(async (channel) => {
+        const html = await fetchRawHTML('t.me', channel);
+        return parseTelegramHTML(html).map(m => ({ ...m, channel }));
+      })
+    );
+    const messages = channelResults
+      .filter(r => r.status === 'fulfilled')
+      .flatMap(r => r.value);
 
     // Only messages from last 2 hours that are impact-related
     const twoHoursAgo = now - 2 * 60 * 60 * 1000;
