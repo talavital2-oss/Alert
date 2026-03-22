@@ -14,7 +14,7 @@ const AlertMap = (function () {
   let currentStyleId = null;
   let styleControlContainer = null;
   const markers = new Map(); // alertId -> { marker, glMarker, timeout, data }
-  const MARKER_LIFETIME = 5 * 60 * 1000; // 5 minutes
+  const MARKER_LIFETIME = 10 * 60 * 1000; // 10 minutes
 
   const alertColors = {
     missiles: '#ef4444',
