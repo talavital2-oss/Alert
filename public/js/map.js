@@ -100,6 +100,8 @@ const AlertMap = (function () {
   const glStyles = [
     { id: 'gl-carto-dark', name: '3D CARTO Dark', theme: 'dark', styleUrl: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json' },
     { id: 'gl-3d-liberty', name: '3D Liberty', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/liberty' },
+    { id: 'gl-3d-dark', name: '3D Liberty Dark', theme: 'dark', styleUrl: 'https://tiles.openfreemap.org/styles/dark' },
+    { id: 'gl-3d-fiord', name: '3D Fiord', theme: 'dark', styleUrl: 'https://tiles.openfreemap.org/styles/fiord' },
     { id: 'gl-3d-bright', name: '3D Bright', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/bright' },
     { id: 'gl-3d-positron', name: '3D Positron', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/positron' },
     { id: 'gl-carto-positron', name: '3D CARTO Light', theme: 'light', styleUrl: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json' },
@@ -184,8 +186,14 @@ const AlertMap = (function () {
     const style = glMap.getStyle();
     if (!style || !style.layers) return;
 
-    // Remove existing 3d-buildings layer if present
+    // Skip if we already added our layer
     if (glMap.getLayer('3d-buildings')) return;
+
+    // Skip if the style already has a fill-extrusion building layer (e.g. Liberty's 'building-3d')
+    const existingExtrusion = style.layers.find(l =>
+      l.type === 'fill-extrusion' && (l['source-layer'] === 'building' || (l.id && l.id.includes('building')))
+    );
+    if (existingExtrusion) return;
 
     // Find a suitable source with building data
     // OpenFreeMap uses openmaptiles schema — building data is in the 'building' source-layer
@@ -404,6 +412,9 @@ const AlertMap = (function () {
     if (!alert.lat || !alert.lng) return;
     const id = alert.id;
     if (markers.has(id)) removeMarker(id);
+
+    // Remove any pre-alert markers near this real alert (within ~10km)
+    clearNearbyPreAlerts(alert.lat, alert.lng);
 
     const color = alertColors[alert.type] || alertColors.general;
 
@@ -659,46 +670,57 @@ const AlertMap = (function () {
 
 
   // ── Pre-Alert markers (amber dots — predicted areas, Category 14) ──
-  const preAlertMarkers = new Map(); // id -> { leafletMarker, glMarker, timeout }
+  const preAlertMarkers = new Map(); // id -> { leafletMarker, glMarker, timeout, lat, lng }
   const PRE_ALERT_COLOR = '#f59e0b'; // amber
-  const PRE_ALERT_LIFETIME = 10 * 60 * 1000; // 10 minutes
 
-  function createPreAlertGLEl() {
-    const el = document.createElement('div');
-    el.className = 'pre-alert-gl-marker';
-    el.style.cssText = `width:18px;height:18px;border-radius:50%;background:rgba(245,158,11,0.25);border:2px solid ${PRE_ALERT_COLOR};box-shadow:0 0 12px rgba(245,158,11,0.5);cursor:pointer;animation:pre-alert-pulse 2s ease-in-out infinite;`;
-    return el;
+  // Remove pre-alert markers near a given coordinate (real alert replaces prediction)
+  function clearNearbyPreAlerts(lat, lng, radiusKm = 10) {
+    const toRemove = [];
+    for (const [id, entry] of preAlertMarkers) {
+      if (!entry.lat || !entry.lng) continue;
+      const dist = haversineKm(lat, lng, entry.lat, entry.lng);
+      if (dist <= radiusKm) {
+        toRemove.push(id);
+      }
+    }
+    for (const id of toRemove) {
+      removePreAlert(id);
+    }
   }
+
+  // Haversine distance in km between two lat/lng points
+  function haversineKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+  const PRE_ALERT_LIFETIME = 10 * 60 * 1000; // 10 minutes
 
   function addPreAlert(preAlert) {
     if (!preAlert.lat || !preAlert.lng) return;
     const id = preAlert.id;
     if (preAlertMarkers.has(id)) return; // already shown
 
-    // Leaflet marker — larger, semi-transparent amber circle with pulse
-    const marker = L.circleMarker([preAlert.lat, preAlert.lng], {
-      radius: 12,
-      color: PRE_ALERT_COLOR,
-      fillColor: PRE_ALERT_COLOR,
-      fillOpacity: 0.2,
-      weight: 2,
-      opacity: 0.8,
-      className: 'pre-alert-marker'
+    // Leaflet — transparent yellow overlay circle (radius in meters)
+    const overlay = L.circle([preAlert.lat, preAlert.lng], {
+      radius: 1500, // 1.5km radius
+      color: 'rgba(245, 158, 11, 0.4)',
+      fillColor: 'rgba(245, 158, 11, 0.15)',
+      fillOpacity: 0.15,
+      weight: 1,
+      opacity: 0.4,
+      interactive: true
     }).addTo(map);
 
-    // Permanent label
-    marker.bindTooltip(`⚠ ${preAlert.region}`, {
-      permanent: true,
-      direction: 'right',
-      offset: [10, 0],
-      className: 'pre-alert-label'
-    });
-
-    // Popup
+    // Popup on click only (no permanent label)
     const timeStr = new Date(preAlert.timeMs).toLocaleTimeString('he-IL', {
       hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem'
     });
-    marker.bindPopup(`
+    overlay.bindPopup(`
       <div class="popup-content" style="direction:rtl;text-align:center;max-width:220px;">
         <div style="font-size:14px;font-weight:700;color:${PRE_ALERT_COLOR};margin-bottom:4px;">⚠️ צפי להתרעות</div>
         <div style="font-size:16px;font-weight:700;margin-bottom:4px;">${preAlert.region}</div>
@@ -707,10 +729,11 @@ const AlertMap = (function () {
       </div>
     `, { className: 'alert-popup', maxWidth: 260 });
 
-    // GL marker
+    // GL overlay — use a transparent yellow circle div
     let glMarker = null;
     if (useGL && glMap) {
-      const el = createPreAlertGLEl();
+      const el = document.createElement('div');
+      el.style.cssText = 'width:60px;height:60px;border-radius:50%;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);cursor:pointer;';
       const popup = new maplibregl.Popup({ offset: 12, maxWidth: '260px' }).setHTML(`
         <div style="direction:rtl;text-align:center;padding:4px;">
           <div style="font-size:14px;font-weight:700;color:${PRE_ALERT_COLOR};margin-bottom:4px;">⚠️ צפי להתרעות</div>
@@ -729,7 +752,7 @@ const AlertMap = (function () {
     const remainingMs = Math.max(0, (preAlert.expiresAt || (preAlert.timeMs + PRE_ALERT_LIFETIME)) - Date.now());
     const timeout = setTimeout(() => removePreAlert(id), remainingMs);
 
-    preAlertMarkers.set(id, { leafletMarker: marker, glMarker, timeout });
+    preAlertMarkers.set(id, { leafletMarker: overlay, glMarker, timeout, lat: preAlert.lat, lng: preAlert.lng });
   }
 
   function removePreAlert(id) {

@@ -925,7 +925,9 @@ app.get('/api/pre-alerts', async (req, res) => {
     const since = Math.floor((now - 15 * 60 * 1000) / 1000); // unix seconds
     const data = await fetchJson(`https://api.rocketil.live/api/alerts?since=${since}&limit=200`, 8000);
 
-    if (!Array.isArray(data) || data.length === 0) {
+    // API returns { alerts: [...], total, since, ts }
+    const alertsArr = Array.isArray(data) ? data : (data && Array.isArray(data.alerts) ? data.alerts : []);
+    if (alertsArr.length === 0) {
       preAlertCache = { time: now, preAlerts: [] };
       return res.json({ preAlerts: [] });
     }
@@ -934,7 +936,7 @@ app.get('/api/pre-alerts', async (req, res) => {
     const preAlerts = [];
     const seenRegions = new Set();
 
-    for (const alert of data) {
+    for (const alert of alertsArr) {
       if (alert.severity !== 'warn') continue;
 
       const alertTime = new Date(alert.timestamp || alert.created_at).getTime();
