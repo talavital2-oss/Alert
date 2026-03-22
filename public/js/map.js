@@ -655,5 +655,96 @@ const AlertMap = (function () {
   }
 
 
-  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts };
+  // ── Pre-Alert markers (amber dots — predicted areas, Category 14) ──
+  const preAlertMarkers = new Map(); // id -> { leafletMarker, glMarker, timeout }
+  const PRE_ALERT_COLOR = '#f59e0b'; // amber
+  const PRE_ALERT_LIFETIME = 10 * 60 * 1000; // 10 minutes
+
+  function createPreAlertGLEl() {
+    const el = document.createElement('div');
+    el.className = 'pre-alert-gl-marker';
+    el.style.cssText = `width:18px;height:18px;border-radius:50%;background:rgba(245,158,11,0.25);border:2px solid ${PRE_ALERT_COLOR};box-shadow:0 0 12px rgba(245,158,11,0.5);cursor:pointer;animation:pre-alert-pulse 2s ease-in-out infinite;`;
+    return el;
+  }
+
+  function addPreAlert(preAlert) {
+    if (!preAlert.lat || !preAlert.lng) return;
+    const id = preAlert.id;
+    if (preAlertMarkers.has(id)) return; // already shown
+
+    // Leaflet marker — larger, semi-transparent amber circle with pulse
+    const marker = L.circleMarker([preAlert.lat, preAlert.lng], {
+      radius: 12,
+      color: PRE_ALERT_COLOR,
+      fillColor: PRE_ALERT_COLOR,
+      fillOpacity: 0.2,
+      weight: 2,
+      opacity: 0.8,
+      className: 'pre-alert-marker'
+    }).addTo(map);
+
+    // Permanent label
+    marker.bindTooltip(`⚠ ${preAlert.region}`, {
+      permanent: true,
+      direction: 'right',
+      offset: [10, 0],
+      className: 'pre-alert-label'
+    });
+
+    // Popup
+    const timeStr = new Date(preAlert.timeMs).toLocaleTimeString('he-IL', {
+      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem'
+    });
+    marker.bindPopup(`
+      <div class="popup-content" style="direction:rtl;text-align:center;max-width:220px;">
+        <div style="font-size:14px;font-weight:700;color:${PRE_ALERT_COLOR};margin-bottom:4px;">⚠️ צפי להתרעות</div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:4px;">${preAlert.region}</div>
+        <div style="font-size:12px;color:#d1d5db;line-height:1.4;margin-bottom:6px;">${preAlert.title}</div>
+        <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+      </div>
+    `, { className: 'alert-popup', maxWidth: 260 });
+
+    // GL marker
+    let glMarker = null;
+    if (useGL && glMap) {
+      const el = createPreAlertGLEl();
+      const popup = new maplibregl.Popup({ offset: 12, maxWidth: '260px' }).setHTML(`
+        <div style="direction:rtl;text-align:center;padding:4px;">
+          <div style="font-size:14px;font-weight:700;color:${PRE_ALERT_COLOR};margin-bottom:4px;">⚠️ צפי להתרעות</div>
+          <div style="font-size:16px;font-weight:700;margin-bottom:4px;">${preAlert.region}</div>
+          <div style="font-size:12px;color:#d1d5db;">${preAlert.title}</div>
+          <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
+        </div>
+      `);
+      glMarker = new maplibregl.Marker({ element: el })
+        .setLngLat([preAlert.lng, preAlert.lat])
+        .setPopup(popup)
+        .addTo(glMap);
+    }
+
+    // Auto-expire
+    const remainingMs = Math.max(0, (preAlert.expiresAt || (preAlert.timeMs + PRE_ALERT_LIFETIME)) - Date.now());
+    const timeout = setTimeout(() => removePreAlert(id), remainingMs);
+
+    preAlertMarkers.set(id, { leafletMarker: marker, glMarker, timeout });
+  }
+
+  function removePreAlert(id) {
+    const entry = preAlertMarkers.get(id);
+    if (!entry) return;
+    map.removeLayer(entry.leafletMarker);
+    if (entry.glMarker) entry.glMarker.remove();
+    clearTimeout(entry.timeout);
+    preAlertMarkers.delete(id);
+  }
+
+  function clearPreAlerts() {
+    for (const [id] of preAlertMarkers) removePreAlert(id);
+  }
+
+  function getPreAlertCount() {
+    return preAlertMarkers.size;
+  }
+
+  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount };
 })();

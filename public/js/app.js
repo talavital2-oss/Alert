@@ -248,6 +248,43 @@
     document.getElementById('map-gl').style.right = rightVal;
   });
 
+  // ── Pre-Alert tracking (Pikud HaOref Category 14 — predicted areas) ──
+  let currentPreAlertIds = new Set();
+  let preAlertPollInterval = null;
+
+  async function fetchPreAlerts() {
+    try {
+      const res = await fetch('/api/pre-alerts');
+      if (!res.ok) return;
+      const data = await res.json();
+      const preAlerts = data.preAlerts || [];
+
+      // Remove expired pre-alerts no longer in the data
+      const newIds = new Set(preAlerts.map(p => p.id));
+      for (const oldId of currentPreAlertIds) {
+        if (!newIds.has(oldId)) {
+          AlertMap.removePreAlert(oldId);
+        }
+      }
+
+      // Add new pre-alerts
+      for (const preAlert of preAlerts) {
+        AlertMap.addPreAlert(preAlert);
+      }
+      currentPreAlertIds = newIds;
+
+      if (preAlerts.length > 0) {
+        console.log(`[Pre-Alerts] ${preAlerts.length} predicted areas: ${preAlerts.map(p => p.region).join(', ')}`);
+      }
+    } catch (e) {
+      // Silently handle fetch errors
+    }
+  }
+
+  // Poll pre-alerts every 15 seconds (they're time-critical)
+  preAlertPollInterval = setInterval(fetchPreAlerts, 15000);
+  fetchPreAlerts(); // initial fetch
+
   // ── Impact tracking (Telegram missile impact reports) ──
   // After an alert, wait 5-10 minutes then fetch impact data from Telegram
   let lastAlertTimes = [];        // timestamps of recent alert events

@@ -902,6 +902,95 @@ app.get('/api/impacts', async (req, res) => {
   }
 });
 
+// ============================================================
+// Pre-Alerts — Pikud HaOref Category 14 "Preliminary Guidance"
+// Fetched via rocketil.live API (severity: "warn")
+// Sent 3-5 minutes before actual alerts to predicted areas
+// ============================================================
+
+let preAlertCache = { time: 0, preAlerts: [] };
+const PRE_ALERT_CACHE_TTL = 15000; // 15-second cache (time-sensitive)
+const PRE_ALERT_EXPIRY_MS = 10 * 60 * 1000; // pre-alerts expire after 10 minutes
+
+app.get('/api/pre-alerts', async (req, res) => {
+  try {
+    const now = Date.now();
+
+    // Return cache if fresh
+    if (now - preAlertCache.time < PRE_ALERT_CACHE_TTL) {
+      return res.json({ preAlerts: preAlertCache.preAlerts, cached: true });
+    }
+
+    // Fetch recent alerts from rocketil.live (last 15 minutes)
+    const since = Math.floor((now - 15 * 60 * 1000) / 1000); // unix seconds
+    const data = await fetchJson(`https://api.rocketil.live/api/alerts?since=${since}&limit=200`, 8000);
+
+    if (!Array.isArray(data) || data.length === 0) {
+      preAlertCache = { time: now, preAlerts: [] };
+      return res.json({ preAlerts: [] });
+    }
+
+    // Filter for pre-alerts (severity: "warn") that haven't expired
+    const preAlerts = [];
+    const seenRegions = new Set();
+
+    for (const alert of data) {
+      if (alert.severity !== 'warn') continue;
+
+      const alertTime = new Date(alert.timestamp || alert.created_at).getTime();
+      if (now - alertTime > PRE_ALERT_EXPIRY_MS) continue; // expired
+
+      // Parse payload
+      let payload = {};
+      try {
+        payload = typeof alert.payload_json === 'string'
+          ? JSON.parse(alert.payload_json)
+          : (alert.payload_json || {});
+      } catch (e) { continue; }
+
+      const regionName = alert.region_name || payload.oref_city || '';
+      if (!regionName) continue;
+
+      // Deduplicate by region
+      if (seenRegions.has(regionName)) continue;
+      seenRegions.add(regionName);
+
+      // Get coordinates — try payload first, then city lookup
+      let lat = payload.lat || null;
+      let lng = payload.lng || null;
+
+      if (!lat || !lng) {
+        const cityData = cities[regionName];
+        if (cityData) {
+          lat = cityData.lat;
+          lng = cityData.lng;
+        }
+      }
+
+      if (!lat || !lng) continue; // can't map it
+
+      preAlerts.push({
+        id: `pre-${alert.id || alert.region_id}`,
+        region: regionName,
+        lat,
+        lng,
+        timeMs: alertTime,
+        timestamp: new Date(alertTime).toISOString(),
+        expiresAt: alertTime + PRE_ALERT_EXPIRY_MS,
+        title: payload.oref_title || 'צפי להתרעות באזורך',
+        eventId: payload.event_id || null,
+        severity: 'warn'
+      });
+    }
+
+    preAlertCache = { time: now, preAlerts };
+    res.json({ preAlerts });
+  } catch (e) {
+    console.error('Pre-alert fetch error:', e.message);
+    res.json({ preAlerts: preAlertCache.preAlerts || [], error: e.message });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
