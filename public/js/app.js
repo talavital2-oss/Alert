@@ -487,12 +487,22 @@
 
       if (impacts.length === 0) return;
 
-      // Display all impacts immediately — no client-side time filtering
-      for (const impact of impacts) {
+      // Only show impacts whose timestamp correlates with a known alert
+      // (alertTime - 2min to alertTime + 30min)
+      const relevant = impacts.filter(imp => {
+        return lastAlertTimes.some(alertTime => {
+          const diff = imp.timeMs - alertTime;
+          return diff > -2 * 60 * 1000 && diff < 30 * 60 * 1000;
+        });
+      });
+
+      if (relevant.length === 0) return;
+
+      for (const impact of relevant) {
         AlertMap.addImpact(impact);
       }
 
-      console.log(`[Impacts] ${impacts.length} impact locations from Telegram`);
+      console.log(`[Impacts] ${relevant.length} impact locations from Telegram`);
     } catch (e) {
       // Silently handle fetch errors
     }
