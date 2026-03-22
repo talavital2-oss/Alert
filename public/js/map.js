@@ -98,9 +98,12 @@ const AlertMap = (function () {
 
   // ── MapLibre GL 3D styles (free, no API key) ──
   const glStyles = [
+    { id: 'gl-carto-dark', name: '3D CARTO Dark', theme: 'dark', styleUrl: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json' },
     { id: 'gl-3d-liberty', name: '3D Liberty', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/liberty' },
     { id: 'gl-3d-bright', name: '3D Bright', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/bright' },
-    { id: 'gl-3d-positron', name: '3D Positron', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/positron' }
+    { id: 'gl-3d-positron', name: '3D Positron', theme: 'light', styleUrl: 'https://tiles.openfreemap.org/styles/positron' },
+    { id: 'gl-carto-positron', name: '3D CARTO Light', theme: 'light', styleUrl: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json' },
+    { id: 'gl-carto-voyager', name: '3D CARTO Voyager', theme: 'light', styleUrl: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json' }
   ];
 
   // All styles for the dropdown
