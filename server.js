@@ -430,6 +430,32 @@ function isImpactRelated(text) {
   return IMPACT_KEYWORDS.some(kw => text.includes(kw));
 }
 
+// Known landmarks (interchanges, junctions, highways) mapped to nearest city coordinates.
+// Telegram reports often reference road landmarks instead of city names.
+const LANDMARK_LOCATIONS = {
+  // Interchanges (מחלפים)
+  'מחלף קסם':      { lat: 32.1064, lng: 34.9511, city: 'מחלף קסם (ליד כפר קאסם)' },
+  'מחלף גלילות':   { lat: 32.1489, lng: 34.8092, city: 'מחלף גלילות (ליד רמת השרון)' },
+  'מחלף השרון':    { lat: 32.1833, lng: 34.8833, city: 'מחלף השרון (ליד הוד השרון)' },
+  'מחלף ענבה':     { lat: 31.8386, lng: 34.9886, city: 'מחלף ענבה (ליד בית שמש)' },
+  'מחלף מורשה':    { lat: 31.8750, lng: 34.8000, city: 'מחלף מורשה (ליד מודיעין)' },
+  'מחלף לוד':      { lat: 31.9500, lng: 34.8833, city: 'מחלף לוד' },
+  'מחלף בן גוריון': { lat: 31.9975, lng: 34.8697, city: 'מחלף בן גוריון (ליד נתב"ג)' },
+  'מחלף אייל':     { lat: 32.2833, lng: 34.9667, city: 'מחלף אייל' },
+  'מחלף רעננה':    { lat: 32.1833, lng: 34.8500, city: 'מחלף רעננה' },
+  'מחלף כפר סבא':  { lat: 32.1833, lng: 34.9167, city: 'מחלף כפר סבא' },
+  'מחלף נחשונים':   { lat: 32.0667, lng: 34.9333, city: 'מחלף נחשונים' },
+  'מחלף ירקון':     { lat: 32.1000, lng: 34.8833, city: 'מחלף ירקון (ליד פתח תקווה)' },
+  'מחלף גהה':      { lat: 32.0833, lng: 34.8333, city: 'מחלף גהה (ליד פתח תקווה)' },
+  // Junctions (צמתים)
+  'צומת מגידו':    { lat: 32.5833, lng: 35.1833, city: 'צומת מגידו' },
+  'צומת גולני':    { lat: 32.7667, lng: 35.5000, city: 'צומת גולני' },
+  'צומת כפר סבא':  { lat: 32.1833, lng: 34.9000, city: 'צומת כפר סבא' },
+  'צומת בילו':     { lat: 31.8500, lng: 34.8167, city: 'צומת בילו' },
+  'צומת שורק':     { lat: 31.7667, lng: 34.7500, city: 'צומת שורק' },
+  'צומת נחשון':    { lat: 31.8333, lng: 34.9833, city: 'צומת נחשון' },
+};
+
 // Hebrew single-letter prefixes that attach to words (ב=in, ה=the, ל=to, מ=from, ש=that, כ=like, ו=and, ד=of)
 const HEBREW_PREFIXES = 'בהלמשכוד';
 
@@ -577,6 +603,22 @@ function extractLocations(text) {
       city: city.name,
       detail
     });
+  }
+
+  // 5. If no city matched, try landmark references (interchanges, junctions)
+  if (results.length === 0) {
+    for (const [landmark, coords] of Object.entries(LANDMARK_LOCATIONS)) {
+      if (text.includes(landmark)) {
+        results.push({
+          name: coords.city,
+          lat: coords.lat,
+          lng: coords.lng,
+          city: coords.city,
+          detail: ''
+        });
+        break; // take the first (most specific) landmark match
+      }
+    }
   }
 
   return results;
