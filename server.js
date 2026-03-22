@@ -498,12 +498,54 @@ async function geocodeStreet(streetName, cityName) {
   return null;
 }
 
-// Enhance locations with street-level geocoding when detail contains a street name
+// Geocode a landmark/place name using Nominatim free-text search
+// Returns { lat, lng } or null
+async function geocodePlace(placeName) {
+  const cacheKey = `place|${placeName}`;
+  if (geocodeCache.has(cacheKey)) return geocodeCache.get(cacheKey);
+
+  try {
+    const query = `${placeName}, ישראל`;
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=il`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'IsraelAlertMap/1.0' },
+      signal: AbortSignal.timeout(5000)
+    });
+    const data = await response.json();
+
+    if (Array.isArray(data) && data.length > 0 && data[0].lat && data[0].lon) {
+      const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      geocodeCache.set(cacheKey, result);
+      console.log(`[Geocode] landmark "${placeName}" → ${result.lat}, ${result.lng}`);
+      return result;
+    }
+  } catch (e) {
+    // Geocoding failed — use fallback coordinates
+  }
+
+  geocodeCache.set(cacheKey, null);
+  return null;
+}
+
+// Enhance locations with precise geocoding:
+// - Streets (רחוב X) → structured street+city query
+// - Landmarks (כיכר הבימה, מחלף קסם) → free-text place search
 // Modifies location objects in-place with geocoded coordinates
 async function geocodeLocationDetails(locations) {
   const streetRegex = /^(רחוב|רח'|שדרות|שד'|סמטת|דרך|כיכר)\s+(.+)$/;
 
   const promises = locations.map(async (loc) => {
+    // Geocode landmarks (area landmarks, interchanges, junctions)
+    if (loc.landmark) {
+      const coords = await geocodePlace(loc.landmark);
+      if (coords) {
+        loc.lat = coords.lat;
+        loc.lng = coords.lng;
+      }
+      return;
+    }
+
+    // Geocode street details
     if (!loc.detail) return;
     const m = loc.detail.match(streetRegex);
     if (!m) return;
@@ -842,7 +884,8 @@ function extractLocations(text) {
           lat: coords.lat,
           lng: coords.lng,
           city: coords.city,
-          detail: ''
+          detail: '',
+          landmark // flag for geocoding
         });
         break;
       }
@@ -858,7 +901,8 @@ function extractLocations(text) {
           lat: coords.lat,
           lng: coords.lng,
           city: coords.city,
-          detail: ''
+          detail: '',
+          landmark // flag for geocoding
         });
         break;
       }
