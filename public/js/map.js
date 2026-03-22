@@ -492,11 +492,15 @@ const AlertMap = (function () {
     return markers.size;
   }
 
-  function panTo(lat, lng) {
+  function panTo(lat, lng, zoom) {
     if (useGL && glMap) {
-      glMap.flyTo({ center: [lng, lat], zoom: glMap.getZoom() });
+      glMap.flyTo({ center: [lng, lat], zoom: zoom || glMap.getZoom() });
     } else {
-      map.panTo([lat, lng], { animate: true });
+      if (zoom) {
+        map.flyTo([lat, lng], zoom, { animate: true });
+      } else {
+        map.panTo([lat, lng], { animate: true });
+      }
     }
   }
 

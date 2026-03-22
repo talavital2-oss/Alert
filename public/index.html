@@ -21,6 +21,13 @@
   <!-- Status Bar -->
   <div id="status-bar">
     <div class="status-left">
+      <button id="menu-toggle" class="icon-btn" title="תפריט">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
       <span class="logo">🛡️ התרעות ישראל</span>
       <span id="connection-status" class="status-dot disconnected">
         <span class="dot"></span>
@@ -50,21 +57,53 @@
     </div>
   </div>
 
+  <!-- Hamburger Menu Overlay -->
+  <div id="menu-overlay" class="menu-overlay hidden"></div>
+  <div id="menu-drawer" class="menu-drawer menu-closed">
+    <div class="menu-header">
+      <span class="menu-title">🛡️ תפריט</span>
+      <button id="menu-close" class="icon-btn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="menu-items">
+      <button class="menu-item" data-section="alerts">
+        <span class="menu-item-icon">🔴</span>
+        <span class="menu-item-label">התרעות אחרונות</span>
+        <span class="menu-item-desc">Red alerts in real-time</span>
+      </button>
+      <button class="menu-item" data-section="impacts">
+        <span class="menu-item-icon">🔵</span>
+        <span class="menu-item-label">היסטוריית פגיעות</span>
+        <span class="menu-item-desc">Impact history — last 12 hours</span>
+      </button>
+    </div>
+  </div>
+
   <!-- Map -->
   <div id="map"></div>
   <div id="map-gl"></div>
 
-  <!-- Alert Panel -->
+  <!-- Side Panel (dynamic content — alerts or impacts) -->
   <div id="alert-panel" class="panel-open">
     <div class="panel-header">
-      <h2>התרעות אחרונות</h2>
+      <h2 id="panel-title">התרעות אחרונות</h2>
       <span id="panel-alert-count">0 התרעות</span>
     </div>
     <div id="alert-list"></div>
+    <div id="impact-list" class="hidden"></div>
     <div id="no-alerts" class="no-alerts">
       <div class="no-alerts-icon">✓</div>
       <p>אין התרעות פעילות</p>
       <p class="no-alerts-sub">No active alerts</p>
+    </div>
+    <div id="no-impacts" class="no-alerts hidden">
+      <div class="no-alerts-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">📍</div>
+      <p>אין דיווחי פגיעות</p>
+      <p class="no-alerts-sub">No impact reports in the last 12 hours</p>
     </div>
   </div>
 

@@ -467,6 +467,58 @@ const CITY_ABBREVIATIONS = {
 // e.g., "רחוב יבנה" = Yavne Street, not the city Yavne
 const STREET_PREFIXES = ['רחוב', 'רח\'', 'שדרות', 'שד\'', 'סמטת', 'דרך', 'כיכר'];
 
+// Geocode cache — avoid repeated lookups for the same street+city
+const geocodeCache = new Map(); // "street|city" -> { lat, lng } or null
+
+// Geocode a street address using Nominatim (OpenStreetMap) — free, no API key
+// Returns { lat, lng } or null if not found
+async function geocodeStreet(streetName, cityName) {
+  const cacheKey = `${streetName}|${cityName}`;
+  if (geocodeCache.has(cacheKey)) return geocodeCache.get(cacheKey);
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?street=${encodeURIComponent(streetName)}&city=${encodeURIComponent(cityName)}&country=Israel&format=json&limit=1`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'IsraelAlertMap/1.0' },
+      signal: AbortSignal.timeout(5000)
+    });
+    const data = await response.json();
+
+    if (Array.isArray(data) && data.length > 0 && data[0].lat && data[0].lon) {
+      const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      geocodeCache.set(cacheKey, result);
+      console.log(`[Geocode] ${streetName}, ${cityName} → ${result.lat}, ${result.lng}`);
+      return result;
+    }
+  } catch (e) {
+    // Geocoding failed — fall back to city center
+  }
+
+  geocodeCache.set(cacheKey, null);
+  return null;
+}
+
+// Enhance locations with street-level geocoding when detail contains a street name
+// Modifies location objects in-place with geocoded coordinates
+async function geocodeLocationDetails(locations) {
+  const streetRegex = /^(רחוב|רח'|שדרות|שד'|סמטת|דרך|כיכר)\s+(.+)$/;
+
+  const promises = locations.map(async (loc) => {
+    if (!loc.detail) return;
+    const m = loc.detail.match(streetRegex);
+    if (!m) return;
+
+    const streetName = m[2].trim();
+    const coords = await geocodeStreet(streetName, loc.city);
+    if (coords) {
+      loc.lat = coords.lat;
+      loc.lng = coords.lng;
+    }
+  });
+
+  await Promise.all(promises);
+}
+
 // Known area landmarks mapped to their city coordinates — ALL regions of Israel
 const AREA_LANDMARKS = {
   // === Tel Aviv & Gush Dan ===
@@ -852,6 +904,7 @@ app.get('/api/impacts', async (req, res) => {
     for (const msg of impactMessages) {
       const locations = extractLocations(msg.text);
       if (locations.length === 0) continue;
+      await geocodeLocationDetails(locations);
 
       for (const loc of locations) {
         const existing = cityImpactMap.get(loc.city);
@@ -899,6 +952,83 @@ app.get('/api/impacts', async (req, res) => {
   } catch (e) {
     console.error('Impact fetch error:', e.message);
     res.json({ impacts: telegramCache.impacts || [], error: e.message });
+  }
+});
+
+// Impact History — last 12 hours of Telegram impact reports
+// Uses the same Telegram scraping, but extends the time window
+app.get('/api/impacts/history', async (req, res) => {
+  try {
+    const now = Date.now();
+    const twelveHoursAgo = now - 12 * 60 * 60 * 1000;
+
+    // Fetch all channels in parallel
+    const channelResults = await Promise.allSettled(
+      TELEGRAM_CHANNELS.map(async (channel) => {
+        const html = await fetchRawHTML('t.me', channel);
+        return parseTelegramHTML(html).map(m => ({ ...m, channel }));
+      })
+    );
+    const messages = channelResults
+      .filter(r => r.status === 'fulfilled')
+      .flatMap(r => r.value);
+
+    // Only messages from last 12 hours that are impact-related
+    const impactMessages = messages.filter(m =>
+      m.timeMs > twelveHoursAgo && isImpactRelated(m.text)
+    );
+
+    // Extract locations and deduplicate
+    const DEDUP_WINDOW_MS = 30 * 60 * 1000;
+    const cityImpactMap = new Map();
+
+    for (const msg of impactMessages) {
+      const locations = extractLocations(msg.text);
+      if (locations.length === 0) continue;
+      await geocodeLocationDetails(locations);
+
+      for (const loc of locations) {
+        const existing = cityImpactMap.get(loc.city);
+        if (existing && Math.abs(msg.timeMs - existing.timeMs) < DEDUP_WINDOW_MS) {
+          if (msg.timeMs > existing.timeMs) {
+            cityImpactMap.set(loc.city, {
+              id: `tg-${msg.id}-${loc.city}`,
+              messageId: msg.id,
+              text: msg.text.substring(0, 300),
+              location: loc.name,
+              city: loc.city,
+              detail: loc.detail,
+              lat: loc.lat,
+              lng: loc.lng,
+              timeMs: msg.timeMs,
+              timestamp: msg.datetime
+            });
+          }
+          continue;
+        }
+
+        cityImpactMap.set(loc.city, {
+          id: `tg-${msg.id}-${loc.city}`,
+          messageId: msg.id,
+          text: msg.text.substring(0, 300),
+          location: loc.name,
+          city: loc.city,
+          detail: loc.detail,
+          lat: loc.lat,
+          lng: loc.lng,
+          timeMs: msg.timeMs,
+          timestamp: msg.datetime
+        });
+      }
+    }
+
+    const impacts = Array.from(cityImpactMap.values())
+      .sort((a, b) => b.timeMs - a.timeMs); // newest first
+
+    res.json({ impacts, count: impacts.length });
+  } catch (e) {
+    console.error('Impact history fetch error:', e.message);
+    res.json({ impacts: [], error: e.message });
   }
 });
 
@@ -1222,6 +1352,7 @@ async function fetchImpactsBackground() {
     for (const msg of impactMessages) {
       const locations = extractLocations(msg.text);
       if (locations.length === 0) continue;
+      await geocodeLocationDetails(locations);
 
       for (const loc of locations) {
         const existing = cityImpactMap.get(loc.city);
