@@ -347,7 +347,7 @@ const IMPACT_POLL_INTERVAL_MS = 30000; // poll every 30 seconds during active wi
 // Telegram channels to scrape for impact reports
 const TELEGRAM_CHANNELS = [
   '/s/fireisrael7777',
-  '/s/aharonyediotoriginal',
+  '/s/aharonyediot9',
   '/s/Yair_Altman_channel14',
 ];
 
