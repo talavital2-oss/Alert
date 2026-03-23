@@ -1015,7 +1015,28 @@ const AlertMap = (function () {
       if (useGL && glMap) {
         const el = document.createElement('div');
         el.className = cls;
-        const glM = new maplibregl.Marker({ element: el }).setLngLat([s.lng, s.lat]).addTo(glMap);
+        el.style.cursor = 'pointer';
+        const popupHtml = `
+          <div style="direction:rtl;text-align:right;min-width:180px;padding:4px;">
+            <div style="font-size:14px;font-weight:700;margin-bottom:6px;">${isClosest ? '🟢 המקלט הקרוב ביותר' : '🟠 מקלט'}</div>
+            <div style="font-size:13px;font-weight:600;color:#e5e7eb;margin-bottom:2px;">${typeStr}</div>
+            ${s.a && s.a !== 'Unknown address' ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:2px;">📍 ${s.a}</div>` : ''}
+            ${s.b ? `<div style="font-size:11px;color:#6b7280;margin-bottom:4px;">🏢 ${s.b}</div>` : ''}
+            <div style="font-size:13px;font-weight:600;color:#f59e0b;margin-top:6px;">📏 ${distStr} · 🚶 ${walkMin} דק׳ הליכה</div>
+            ${s.s ? `<div style="font-size:11px;color:#6b7280;margin-top:2px;">שטח: ${s.s} מ״ר</div>` : ''}
+            ${s.cap ? `<div style="font-size:11px;color:#6b7280;">קיבולת: ${s.cap} איש</div>` : ''}
+            <div style="margin-top:8px;display:flex;gap:6px;">
+              <a href="https://www.google.com/maps/dir/?api=1${originParam}&destination=${s.lat},${s.lng}&travelmode=walking" target="_blank" style="flex:1;text-align:center;padding:6px;font-size:12px;color:#fff;background:#3b82f6;border-radius:6px;text-decoration:none;font-weight:600;">🧭 הליכה</a>
+              <a href="https://waze.com/ul?ll=${s.lat},${s.lng}&navigate=yes" target="_blank" style="flex:1;text-align:center;padding:6px;font-size:12px;color:#fff;background:#33ccff;border-radius:6px;text-decoration:none;font-weight:600;">🚗 Waze</a>
+            </div>
+          </div>
+        `;
+        const popup = new maplibregl.Popup({ offset: 12, maxWidth: '280px' }).setHTML(popupHtml);
+        const glM = new maplibregl.Marker({ element: el })
+          .setLngLat([s.lng, s.lat])
+          .setPopup(popup)
+          .addTo(glMap);
+        if (isClosest) glM.togglePopup();
         shelterGlMarkers.push(glM);
       }
     }
