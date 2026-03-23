@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/style.css?v=7">
 </head>
 <body>
   <!-- Status Bar -->
@@ -50,6 +50,15 @@
     </div>
   </div>
 
+  <!-- Map Search Overlay -->
+  <div id="map-search-overlay">
+    <div class="map-search-wrap">
+      <input type="text" id="map-search-input" class="map-search-input" placeholder="חפש מקום, כתובת, מקום עניין..." autocomplete="off" />
+      <button id="map-search-clear" class="map-search-clear hidden">✕</button>
+    </div>
+    <div id="map-search-results" class="map-search-results hidden"></div>
+  </div>
+
   <!-- Map -->
   <div id="map"></div>
   <div id="map-gl"></div>
@@ -67,6 +76,10 @@
         <span class="tab-label">פגיעות</span>
         <span id="tab-impact-count" class="tab-count">0</span>
       </button>
+      <button class="panel-tab" data-section="cities">
+        <span class="tab-dot tab-dot-green"></span>
+        <span class="tab-label">ערים</span>
+      </button>
     </div>
     <div id="alert-list"></div>
     <div id="impact-list" class="hidden"></div>
@@ -74,6 +87,14 @@
       <div class="no-alerts-icon">✓</div>
       <p>אין התרעות פעילות</p>
       <p class="no-alerts-sub">No active alerts</p>
+    </div>
+    <div id="cities-section" class="hidden">
+      <div class="city-search-wrap">
+        <input type="text" id="city-search" class="city-search-input" placeholder="חפש עיר..." autocomplete="off" />
+        <button id="city-clear-btn" class="city-clear-btn hidden" title="נקה בחירה">✕</button>
+      </div>
+      <div id="city-selected" class="city-selected hidden"></div>
+      <div id="city-results" class="city-results"></div>
     </div>
     <div id="no-impacts" class="no-alerts hidden">
       <div class="no-alerts-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">📍</div>
@@ -89,9 +110,9 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 
   <!-- App Modules -->
-  <script src="js/sounds.js?v=5"></script>
-  <script src="js/map.js?v=5"></script>
-  <script src="js/alerts.js?v=5"></script>
-  <script src="js/app.js?v=5"></script>
+  <script src="js/sounds.js?v=7"></script>
+  <script src="js/map.js?v=7"></script>
+  <script src="js/alerts.js?v=7"></script>
+  <script src="js/app.js?v=7"></script>
 </body>
 </html>

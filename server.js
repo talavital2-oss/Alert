@@ -335,19 +335,18 @@ function fetchOrefAlerts() {
 // ============================================================
 
 let telegramCache = { time: 0, impacts: [] };
-const TELEGRAM_CACHE_TTL = 30000; // 30-second cache
+const TELEGRAM_CACHE_TTL = 10000; // 10-second cache (matches poll interval during alerts)
 
 // Alert-triggered impact polling state
 let lastAlertDetectedAt = 0;           // timestamp of most recent alert detection
 let impactPollingInterval = null;      // interval handle for background polling
-const IMPACT_POLL_DELAY_MS = 120000;   // wait 120s after alert before first poll
-const IMPACT_POLL_WINDOW_MS = 600000;  // keep polling for 10 minutes after alert
-const IMPACT_POLL_INTERVAL_MS = 30000; // poll every 30 seconds during active window
+const IMPACT_POLL_INTERVAL_MS = 10000; // poll every 10 seconds during active window
+const IMPACT_POLL_WINDOW_MS = 20 * 60 * 1000; // keep polling for 20 minutes after last alert
 
 // Telegram channels to scrape for impact reports
 const TELEGRAM_CHANNELS = [
   '/s/fireisrael7777',
-  '/s/aharonyediotoriginal',
+  '/s/aharonyediot9',
   '/s/Yair_Altman_channel14',
 ];
 
@@ -1472,24 +1471,19 @@ function categorizeAlert(cat) {
 // Starts 120s after alerts are detected, runs for 10 minutes
 // ============================================================
 
-// Fetch impacts from all Telegram channels (background poller)
+// Fetch impacts from all Telegram channels (runs during alert window only)
 async function fetchImpactsBackground() {
   const now = Date.now();
 
-  // Check if we're still within the polling window
-  const timeSinceAlert = now - lastAlertDetectedAt;
-  if (timeSinceAlert > IMPACT_POLL_WINDOW_MS) {
-    // Window expired — stop polling
+  // Stop if 20-min window expired since last alert
+  if (now - lastAlertDetectedAt > IMPACT_POLL_WINDOW_MS) {
     if (impactPollingInterval) {
       clearInterval(impactPollingInterval);
       impactPollingInterval = null;
-      console.log(`[${new Date().toISOString()}] Impact polling stopped (10-min window expired)`);
+      console.log(`[${new Date().toISOString()}] Impact polling stopped (20-min window expired)`);
     }
     return;
   }
-
-  // Don't poll until 120s after the alert
-  if (timeSinceAlert < IMPACT_POLL_DELAY_MS) return;
 
   try {
     // Fetch all channels in parallel
@@ -1571,14 +1565,15 @@ async function fetchImpactsBackground() {
   }
 }
 
-// Called when alerts are detected — starts impact polling after delay
+// Called when alerts are detected — start impact polling immediately
 function onAlertDetected() {
   lastAlertDetectedAt = Date.now();
 
-  // Start polling if not already running
+  // Start polling if not already running (every 10s for 20 min)
   if (!impactPollingInterval) {
-    console.log(`[${new Date().toISOString()}] Alert detected — impact polling will start in ${IMPACT_POLL_DELAY_MS / 1000}s`);
+    console.log(`[${new Date().toISOString()}] Alert detected — starting impact polling (every ${IMPACT_POLL_INTERVAL_MS / 1000}s for ${IMPACT_POLL_WINDOW_MS / 60000} min)`);
     impactPollingInterval = setInterval(fetchImpactsBackground, IMPACT_POLL_INTERVAL_MS);
+    fetchImpactsBackground(); // immediate first fetch
   }
 }
 

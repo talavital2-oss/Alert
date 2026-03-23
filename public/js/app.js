@@ -20,11 +20,18 @@
   const panelTabs = document.querySelectorAll('.panel-tab');
   const tabAlertCount = document.getElementById('tab-alert-count');
   const tabImpactCount = document.getElementById('tab-impact-count');
+  const citiesSection = document.getElementById('cities-section');
+  const citySearch = document.getElementById('city-search');
+  const cityClearBtn = document.getElementById('city-clear-btn');
+  const citySelected = document.getElementById('city-selected');
+  const cityResults = document.getElementById('city-results');
 
   let eventHistory = []; // array of event objects
   let knownEventIds = new Set(); // track event IDs to prevent duplicates
-  let activeSection = 'alerts'; // 'alerts' or 'impacts'
+  let activeSection = 'alerts'; // 'alerts' or 'impacts' or 'cities'
   let impactHistoryMarkers = []; // temporary markers shown when clicking impact cards
+  let allCities = []; // loaded from server
+  let selectedCity = null; // currently highlighted city
 
   // Initialize map
   AlertMap.init();
@@ -51,17 +58,24 @@
     // Clear any impact history markers from map
     clearImpactHistoryMarkers();
 
+    // Hide all sections first
+    alertList.classList.add('hidden');
+    impactList.classList.add('hidden');
+    citiesSection.classList.add('hidden');
+    noAlerts.style.display = 'none';
+    noImpacts.classList.add('hidden');
+
     if (section === 'alerts') {
       alertList.classList.remove('hidden');
-      impactList.classList.add('hidden');
-      noImpacts.classList.add('hidden');
       noAlerts.style.display = eventHistory.length === 0 ? '' : 'none';
       updateAlertCounts();
     } else if (section === 'impacts') {
-      alertList.classList.add('hidden');
-      noAlerts.style.display = 'none';
       impactList.classList.remove('hidden');
       loadImpactHistory();
+    } else if (section === 'cities') {
+      citiesSection.classList.remove('hidden');
+      if (allCities.length === 0) loadCities();
+      citySearch.focus();
     }
 
     // Open panel if closed
@@ -409,34 +423,21 @@
   // Called when new alerts arrive — schedule impact fetching 2 min later
   function recordAlertTime(events) {
     if (!events || events.length === 0) return;
-    const now = Date.now();
-    for (const ev of events) {
-      lastAlertTimes.push(ev.maxTime || now);
-    }
-    // Keep only last 2 hours of alert times
-    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
-    lastAlertTimes = lastAlertTimes.filter(t => t > twoHoursAgo);
 
-    // Schedule impact fetch 2 minutes after this alert
-    if (!impactPollTimer) {
-      impactPollTimer = setTimeout(() => {
-        impactPollTimer = null;
-        fetchImpacts();
-        startImpactPolling();
-      }, 2 * 60 * 1000);
+    // Start impact polling immediately (every 10s)
+    if (!impactPollingInterval) {
+      fetchImpacts(); // immediate first fetch
+      impactPollingInterval = setInterval(fetchImpacts, 10000);
     }
-  }
 
-  function startImpactPolling() {
-    if (impactPollingInterval) return;
-    impactPollingInterval = setInterval(fetchImpacts, 30000); // every 30s
-    // Stop polling after 10 minutes
+    // Reset the stop timer — 20 min from last alert
+    if (impactPollingStop) clearTimeout(impactPollingStop);
     impactPollingStop = setTimeout(() => {
       if (impactPollingInterval) {
         clearInterval(impactPollingInterval);
         impactPollingInterval = null;
       }
-    }, 10 * 60 * 1000);
+    }, 20 * 60 * 1000);
   }
 
   async function fetchImpacts() {
@@ -448,22 +449,13 @@
 
       if (impacts.length === 0) return;
 
-      // Only show impacts whose timestamp correlates with a known alert
-      // (alertTime - 2min to alertTime + 30min)
-      const relevant = impacts.filter(imp => {
-        return lastAlertTimes.some(alertTime => {
-          const diff = imp.timeMs - alertTime;
-          return diff > -2 * 60 * 1000 && diff < 30 * 60 * 1000;
-        });
-      });
-
-      if (relevant.length === 0) return;
-
-      for (const impact of relevant) {
+      // Show all impacts the server returns — the server already does
+      // contextual filtering (missile-related only, no car accidents etc.)
+      for (const impact of impacts) {
         AlertMap.addImpact(impact);
       }
 
-      console.log(`[Impacts] ${relevant.length} impact locations from Telegram`);
+      console.log(`[Impacts] ${impacts.length} impact locations from Telegram`);
     } catch (e) {
       // Silently handle fetch errors
     }
@@ -484,6 +476,220 @@
     onClear: handleClear,
     onConnectionChange: setConnectionStatus,
     onInit: handleInit
+  });
+
+  // ── City Search & Selection ──
+  async function loadCities() {
+    try {
+      const res = await fetch('/api/cities');
+      const data = await res.json();
+      // Convert object {name: {lat, lng, he, en, countdown}} to array
+      allCities = Object.entries(data).map(([name, c]) => ({
+        name,
+        he: c.he || name,
+        en: c.en || '',
+        lat: c.lat,
+        lng: c.lng,
+        countdown: c.countdown
+      }));
+      allCities.sort((a, b) => a.he.localeCompare(b.he, 'he'));
+      renderCityResults(''); // show all initially
+    } catch (e) {
+      cityResults.innerHTML = '<div style="text-align:center;padding:20px;color:var(--red-alert);">שגיאה בטעינת ערים</div>';
+    }
+  }
+
+  function renderCityResults(query) {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? allCities.filter(c =>
+          c.he.includes(q) || c.en.toLowerCase().includes(q) || c.name.includes(q)
+        )
+      : allCities;
+
+    // Limit to 100 results for performance
+    const shown = filtered.slice(0, 100);
+    const extra = filtered.length - shown.length;
+
+    cityResults.innerHTML = shown.map(c => `
+      <div class="city-result-item" data-city="${encodeURIComponent(c.name)}" data-lat="${c.lat}" data-lng="${c.lng}">
+        <div>
+          <div class="city-result-name">${c.he}</div>
+          ${c.en ? `<div class="city-result-en">${c.en}</div>` : ''}
+        </div>
+        ${c.countdown ? `<div class="city-result-countdown">${c.countdown}s</div>` : ''}
+      </div>
+    `).join('') + (extra > 0 ? `<div style="text-align:center;padding:8px;color:var(--text-dim);font-size:12px;">+${extra} ערים נוספות — חפש לסנן</div>` : '');
+
+    // Click handlers
+    cityResults.querySelectorAll('.city-result-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const name = decodeURIComponent(el.dataset.city);
+        const lat = parseFloat(el.dataset.lat);
+        const lng = parseFloat(el.dataset.lng);
+        const city = allCities.find(c => c.name === name);
+        selectCity(city || { name, he: name, en: '', lat, lng });
+      });
+    });
+  }
+
+  function selectCity(city) {
+    selectedCity = city;
+    citySelected.classList.remove('hidden');
+    citySelected.innerHTML = `
+      <span class="city-selected-name">📍 ${city.he}</span>
+      ${city.en ? `<span class="city-selected-en">${city.en}</span>` : ''}
+    `;
+    cityClearBtn.classList.remove('hidden');
+    citySearch.value = '';
+    renderCityResults('');
+
+    // Highlight on map
+    AlertMap.highlightCity(city.he, city.lat, city.lng);
+  }
+
+  function clearCitySelection() {
+    selectedCity = null;
+    citySelected.classList.add('hidden');
+    citySelected.innerHTML = '';
+    cityClearBtn.classList.add('hidden');
+    citySearch.value = '';
+    renderCityResults('');
+    AlertMap.clearHighlight();
+  }
+
+  // Wire up search input
+  citySearch.addEventListener('input', () => {
+    renderCityResults(citySearch.value);
+  });
+
+  cityClearBtn.addEventListener('click', clearCitySelection);
+
+  // ── Map Search (Nominatim — streets, places, landmarks, POIs) ──
+  const mapSearchInput = document.getElementById('map-search-input');
+  const mapSearchClear = document.getElementById('map-search-clear');
+  const mapSearchResults = document.getElementById('map-search-results');
+  let searchDebounce = null;
+
+  const TYPE_ICONS = {
+    city: '🏙️', town: '🏙️', village: '🏘️', hamlet: '🏘️',
+    road: '🛣️', street: '🛣️', residential: '🛣️', motorway: '🛣️',
+    building: '🏢', house: '🏠', apartments: '🏢',
+    school: '🏫', university: '🎓', college: '🎓',
+    hospital: '🏥', clinic: '🏥', pharmacy: '💊',
+    restaurant: '🍽️', cafe: '☕', fast_food: '🍔',
+    supermarket: '🛒', mall: '🛍️', shop: '🛍️',
+    park: '🌳', garden: '🌳', playground: '🎪',
+    bus_stop: '🚏', station: '🚉', railway: '🚉',
+    place_of_worship: '🕌', synagogue: '🕍', mosque: '🕌', church: '⛪',
+    monument: '🗿', memorial: '🗿', archaeological_site: '🏛️',
+    hotel: '🏨', tourism: '📍', attraction: '⭐',
+    fuel: '⛽', parking: '🅿️',
+    military: '🎖️', police: '👮',
+  };
+
+  function getIcon(type, category) {
+    if (TYPE_ICONS[type]) return TYPE_ICONS[type];
+    if (TYPE_ICONS[category]) return TYPE_ICONS[category];
+    if (category === 'highway' || category === 'road') return '🛣️';
+    if (category === 'building') return '🏢';
+    if (category === 'amenity') return '📍';
+    if (category === 'shop') return '🛍️';
+    if (category === 'tourism') return '📍';
+    return '📍';
+  }
+
+  function getZoomForType(type) {
+    if (['city', 'town'].includes(type)) return 14;
+    if (['village', 'hamlet', 'suburb', 'neighbourhood'].includes(type)) return 15;
+    if (['road', 'street', 'residential', 'motorway'].includes(type)) return 17;
+    return 17;
+  }
+
+  async function searchMap(query) {
+    if (!query || query.trim().length < 2) {
+      mapSearchResults.classList.add('hidden');
+      return;
+    }
+
+    mapSearchResults.classList.remove('hidden');
+    mapSearchResults.innerHTML = '<div class="map-search-loading">מחפש...</div>';
+
+    try {
+      const q = encodeURIComponent(query.trim());
+      const url = `https://nominatim.openstreetmap.org/search?q=${q}&countrycodes=il&format=json&addressdetails=1&limit=8&accept-language=he`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'IsraelAlertMap/1.0' } });
+      const results = await res.json();
+
+      if (results.length === 0) {
+        mapSearchResults.innerHTML = '<div class="map-search-loading">לא נמצאו תוצאות</div>';
+        return;
+      }
+
+      mapSearchResults.innerHTML = results.map((r, i) => {
+        const icon = getIcon(r.type, r.class);
+        const name = r.display_name.split(',')[0];
+        const detail = r.display_name.split(',').slice(1, 3).join(',').trim();
+        const typeLabel = r.type.replace(/_/g, ' ');
+        return `
+          <div class="map-search-item" data-idx="${i}" data-lat="${r.lat}" data-lng="${r.lon}" data-name="${name.replace(/"/g, '&quot;')}" data-type="${r.type}">
+            <span class="map-search-icon">${icon}</span>
+            <div class="map-search-info">
+              <div class="map-search-name">${name}</div>
+              ${detail ? `<div class="map-search-detail">${detail}</div>` : ''}
+            </div>
+            <span class="map-search-type">${typeLabel}</span>
+          </div>
+        `;
+      }).join('');
+
+      mapSearchResults.querySelectorAll('.map-search-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const lat = parseFloat(el.dataset.lat);
+          const lng = parseFloat(el.dataset.lng);
+          const name = el.dataset.name;
+          const zoom = getZoomForType(el.dataset.type);
+          AlertMap.showSearchPin(name, lat, lng, zoom);
+          mapSearchResults.classList.add('hidden');
+          mapSearchClear.classList.remove('hidden');
+        });
+      });
+    } catch (e) {
+      mapSearchResults.innerHTML = '<div class="map-search-loading">שגיאה בחיפוש</div>';
+    }
+  }
+
+  mapSearchInput.addEventListener('input', () => {
+    clearTimeout(searchDebounce);
+    const val = mapSearchInput.value;
+    if (val.trim().length < 2) {
+      mapSearchResults.classList.add('hidden');
+      mapSearchClear.classList.toggle('hidden', !val);
+      return;
+    }
+    mapSearchClear.classList.remove('hidden');
+    searchDebounce = setTimeout(() => searchMap(val), 400);
+  });
+
+  mapSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      mapSearchInput.blur();
+      mapSearchResults.classList.add('hidden');
+    }
+  });
+
+  mapSearchClear.addEventListener('click', () => {
+    mapSearchInput.value = '';
+    mapSearchResults.classList.add('hidden');
+    mapSearchClear.classList.add('hidden');
+    AlertMap.clearSearchPin();
+  });
+
+  // Close results when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#map-search-overlay')) {
+      mapSearchResults.classList.add('hidden');
+    }
   });
 
   console.log('Israel Alert Map initialized');
