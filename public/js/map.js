@@ -722,47 +722,80 @@ const AlertMap = (function () {
     const id = preAlert.id;
     if (preAlertMarkers.has(id)) return; // already shown
 
-    // Leaflet — transparent yellow overlay circle (radius in meters)
-    const overlay = L.circle([preAlert.lat, preAlert.lng], {
-      radius: 1500, // 1.5km radius
-      color: 'rgba(245, 158, 11, 0.4)',
-      fillColor: 'rgba(245, 158, 11, 0.15)',
-      fillOpacity: 0.15,
-      weight: 1,
-      opacity: 0.4,
-      interactive: true
-    }).addTo(map);
-
-    // Popup on click only (no permanent label)
     const timeStr = new Date(preAlert.timeMs).toLocaleTimeString('he-IL', {
       hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem'
     });
-    overlay.bindPopup(`
-      <div class="popup-content" style="direction:rtl;text-align:center;max-width:220px;">
-        <div style="font-size:14px;font-weight:700;color:${PRE_ALERT_COLOR};margin-bottom:4px;">⚠️ צפי להתרעות</div>
-        <div style="font-size:16px;font-weight:700;margin-bottom:4px;">${preAlert.region}</div>
-        <div style="font-size:12px;color:#d1d5db;line-height:1.4;margin-bottom:6px;">${preAlert.title}</div>
+    const cityList = (preAlert.cities || [preAlert.region]).slice(0, 8).join(', ');
+    const extra = (preAlert.cityCount || 0) > 8 ? `\n+${preAlert.cityCount - 8} נוספים` : '';
+    const popupHtml = `
+      <div class="popup-content" style="direction:rtl;text-align:center;max-width:260px;">
+        <div style="font-size:14px;font-weight:700;color:${PRE_ALERT_COLOR};margin-bottom:4px;">⚠️ צפי להתרעות — ${preAlert.cityCount || 1} יישובים</div>
+        <div style="font-size:12px;color:#d1d5db;line-height:1.6;margin-bottom:6px;">${cityList}${extra}</div>
         <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
       </div>
-    `, { className: 'alert-popup', maxWidth: 260 });
+    `;
 
-    // GL overlay — use a transparent yellow circle div
+    let overlay;
+    if (preAlert.polygon && preAlert.polygon.length >= 3) {
+      // Draw polygon region (like rocketil.live)
+      overlay = L.polygon(preAlert.polygon, {
+        color: 'rgba(245, 158, 11, 0.7)',
+        fillColor: 'rgba(245, 158, 11, 0.15)',
+        fillOpacity: 0.15,
+        weight: 2,
+        opacity: 0.7,
+        interactive: true,
+        dashArray: null
+      }).addTo(map);
+    } else {
+      // Fallback to circle for single points
+      overlay = L.circle([preAlert.lat, preAlert.lng], {
+        radius: 3000,
+        color: 'rgba(245, 158, 11, 0.7)',
+        fillColor: 'rgba(245, 158, 11, 0.15)',
+        fillOpacity: 0.15,
+        weight: 2,
+        opacity: 0.7,
+        interactive: true
+      }).addTo(map);
+    }
+    overlay.bindPopup(popupHtml, { className: 'alert-popup', maxWidth: 280 });
+
+    // GL overlay — polygon or marker
     let glMarker = null;
     if (useGL && glMap) {
-      const el = document.createElement('div');
-      el.style.cssText = 'width:60px;height:60px;border-radius:50%;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);cursor:pointer;';
-      const popup = new maplibregl.Popup({ offset: 12, maxWidth: '260px' }).setHTML(`
-        <div style="direction:rtl;text-align:center;padding:4px;">
-          <div style="font-size:14px;font-weight:700;color:${PRE_ALERT_COLOR};margin-bottom:4px;">⚠️ צפי להתרעות</div>
-          <div style="font-size:16px;font-weight:700;margin-bottom:4px;">${preAlert.region}</div>
-          <div style="font-size:12px;color:#d1d5db;">${preAlert.title}</div>
-          <div style="font-size:11px;color:#6b7280;">${timeStr}</div>
-        </div>
-      `);
-      glMarker = new maplibregl.Marker({ element: el })
-        .setLngLat([preAlert.lng, preAlert.lat])
-        .setPopup(popup)
-        .addTo(glMap);
+      const sourceId = `pre-alert-${id}`;
+      if (preAlert.polygon && preAlert.polygon.length >= 3) {
+        // GeoJSON polygon for MapLibre
+        const coords = preAlert.polygon.map(p => [p[1], p[0]]); // [lng, lat]
+        coords.push(coords[0]); // close polygon
+        glMap.addSource(sourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: { type: 'Polygon', coordinates: [coords] }
+          }
+        });
+        glMap.addLayer({
+          id: sourceId + '-fill',
+          type: 'fill',
+          source: sourceId,
+          paint: { 'fill-color': 'rgba(245, 158, 11, 0.15)', 'fill-opacity': 0.6 }
+        });
+        glMap.addLayer({
+          id: sourceId + '-line',
+          type: 'line',
+          source: sourceId,
+          paint: { 'line-color': 'rgba(245, 158, 11, 0.7)', 'line-width': 2 }
+        });
+        glMarker = { sourceId, isPolygon: true };
+      } else {
+        const el = document.createElement('div');
+        el.style.cssText = 'width:60px;height:60px;border-radius:50%;background:rgba(245,158,11,0.15);border:2px solid rgba(245,158,11,0.7);cursor:pointer;';
+        glMarker = new maplibregl.Marker({ element: el })
+          .setLngLat([preAlert.lng, preAlert.lat])
+          .addTo(glMap);
+      }
     }
 
     // Auto-expire
@@ -776,7 +809,19 @@ const AlertMap = (function () {
     const entry = preAlertMarkers.get(id);
     if (!entry) return;
     map.removeLayer(entry.leafletMarker);
-    if (entry.glMarker) entry.glMarker.remove();
+    if (entry.glMarker) {
+      if (entry.glMarker.isPolygon && glMap) {
+        // Remove GL polygon layers and source
+        const sid = entry.glMarker.sourceId;
+        try {
+          if (glMap.getLayer(sid + '-fill')) glMap.removeLayer(sid + '-fill');
+          if (glMap.getLayer(sid + '-line')) glMap.removeLayer(sid + '-line');
+          if (glMap.getSource(sid)) glMap.removeSource(sid);
+        } catch (e) { /* ignore if already removed */ }
+      } else if (entry.glMarker.remove) {
+        entry.glMarker.remove();
+      }
+    }
     clearTimeout(entry.timeout);
     preAlertMarkers.delete(id);
   }
