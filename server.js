@@ -1048,12 +1048,12 @@ app.get('/api/impacts', async (req, res) => {
   }
 });
 
-// Impact History — last 12 hours of Telegram impact reports
+// Impact History — last 24 hours of Telegram impact reports
 // Uses the same Telegram scraping, but extends the time window
 app.get('/api/impacts/history', async (req, res) => {
   try {
     const now = Date.now();
-    const twelveHoursAgo = now - 12 * 60 * 60 * 1000;
+    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
 
     // Fetch all channels in parallel
     const channelResults = await Promise.allSettled(
@@ -1066,9 +1066,9 @@ app.get('/api/impacts/history', async (req, res) => {
       .filter(r => r.status === 'fulfilled')
       .flatMap(r => r.value);
 
-    // Only messages from last 12 hours that are impact-related
+    // Only messages from last 24 hours that are impact-related
     const impactMessages = messages.filter(m =>
-      m.timeMs > twelveHoursAgo && isImpactRelated(m.text)
+      m.timeMs > twentyFourHoursAgo && isImpactRelated(m.text)
     );
 
     // Extract locations and deduplicate
