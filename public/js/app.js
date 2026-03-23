@@ -583,6 +583,18 @@
   }
 
   btnMyLocation.addEventListener('click', async () => {
+    // Toggle off
+    if (btnMyLocation.classList.contains('active')) {
+      AlertMap.clearMyLocation();
+      AlertMap.clearShelters();
+      btnMyLocation.classList.remove('active');
+      btnShowShelters.classList.remove('active');
+      myLat = null;
+      myLng = null;
+      sheltersVisible = false;
+      return;
+    }
+
     try {
       btnMyLocation.style.opacity = '0.5';
       const pos = await getMyLocation();
@@ -633,7 +645,7 @@
         return;
       }
 
-      AlertMap.showShelters(shelterList);
+      AlertMap.showShelters(shelterList, myLat, myLng);
       btnShowShelters.classList.add('active');
       sheltersVisible = true;
       btnShowShelters.style.opacity = '';

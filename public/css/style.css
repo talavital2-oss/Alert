@@ -721,8 +721,8 @@ html, body {
 /* ===== Map Action Buttons ===== */
 #map-actions {
   position: fixed;
-  bottom: 24px;
-  left: 16px;
+  bottom: 70px;
+  left: 12px;
   z-index: 600;
   display: flex;
   flex-direction: column;
@@ -785,18 +785,25 @@ html, body {
 
 /* Shelter markers */
 .shelter-marker {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #f59e0b;
   border: 2px solid rgba(255, 255, 255, 0.8);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
   cursor: pointer;
+  /* Expand click target beyond visual size */
+  position: relative;
+}
+.shelter-marker::after {
+  content: '';
+  position: absolute;
+  top: -8px; left: -8px; right: -8px; bottom: -8px;
 }
 
 .shelter-marker.closest {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   background: #22c55e;
   border: 3px solid #fff;
   box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
