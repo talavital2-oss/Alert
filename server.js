@@ -1185,7 +1185,7 @@ function convexHull(points) {
 }
 
 let preAlertCache = { time: 0, preAlerts: [] };
-const PRE_ALERT_CACHE_TTL = 15000; // 15-second cache (time-sensitive)
+const PRE_ALERT_CACHE_TTL = 5000; // 5-second cache (show immediately)
 const PRE_ALERT_EXPIRY_MS = 10 * 60 * 1000; // pre-alerts expire after 10 minutes
 
 app.get('/api/pre-alerts', async (req, res) => {

@@ -394,8 +394,8 @@
     }
   }
 
-  // Poll pre-alerts every 15 seconds (they're time-critical)
-  preAlertPollInterval = setInterval(fetchPreAlerts, 15000);
+  // Poll pre-alerts every 5 seconds (show immediately when available)
+  preAlertPollInterval = setInterval(fetchPreAlerts, 5000);
   fetchPreAlerts(); // initial fetch
 
   // ── Impact tracking (Telegram missile impact reports) ──
