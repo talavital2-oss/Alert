@@ -363,10 +363,39 @@ const IMPACT_KEYWORDS = [
   'פגע', 'פגעה'
 ];
 
-// Messages containing these are NOT impacts
-const EXCLUDE_PATTERNS = [
-  'תרגיל', 'בדיקה', 'דיווח שגוי', 'אין נפילות', 'דיווח כוזב',
-  'שקט', 'הותר לפרסום'
+// ALWAYS exclude — these are never missile impacts regardless of other keywords
+const ALWAYS_EXCLUDE = [
+  // False alarms / drills
+  'תרגיל', 'בדיקה', 'דיווח שגוי', 'אין נפילות', 'דיווח כוזב', 'שקט',
+  // "All clear" / shelter exit announcements
+  'ניתן לצאת ממרחבים מוגנים',
+  'ניתן לצאת ממרחבים',
+  'ניתנה הוראת פתיחה',
+  'ניתן לחזור לשגרה',
+];
+
+// Missile/rocket context — if a message has impact keywords AND these, it's a real impact
+const MISSILE_CONTEXT = [
+  'רקטה', 'רקטות', 'טיל', 'טילים', 'טיל בליסטי', 'טילים בליסטיים',
+  'כטב"מ', 'כטמ"ב', 'כלי טיס', 'מל"ט', 'כטבם', // drones
+  'יירוט', 'יירוטים', 'כיפת ברזל', 'חץ',          // interception / Iron Dome / Arrow
+  'שברי', 'רסיס', 'רסיסים', 'אמל"ח', 'אמל״ח', 'אמלח', // shrapnel / ordnance
+  'צבע אדום', 'אזעקה', 'אזעקות', 'התרעה',          // alert context
+  'חיזבאללה', 'חמאס', 'עזה', 'לבנון', 'תימן', 'חות\'ים', 'חות׳ים', 'איראן', // conflict parties
+  'התקפה', 'מתקפה', 'ירי רקטי', 'ירי טילים', 'מטח', 'מטחים', // attack terms
+  'חיל האוויר', 'צה"ל', 'צה״ל', 'פיקוד העורף',     // military
+  'שטח פתוח', 'שטחים פתוחים',                        // open area (common impact location)
+  'מבנה', 'מבנים', 'גג', 'חצר',                      // building hit
+  'מקלט', 'ממ"ד', 'ממ״ד', 'מרחב מוגן',              // shelter (people injured heading to shelter = missile context)
+];
+
+// Non-missile context — if a message has impact keywords but ONLY these contexts, it's NOT a missile impact
+const NON_MISSILE_CONTEXT = [
+  'תאונת דרכים', 'תאונת עבודה', 'תאונה',            // accidents
+  'פלילי', 'דקירה', 'רצח', 'שוד', 'פיגוע דריסה',   // crime
+  'שריפה בדירה', 'שריפה במבנה', 'שריפת יער',        // non-missile fires
+  'הצפה', 'שיטפון', 'רעידת אדמה',                    // natural events
+  'התהפכות רכב', 'תאונת טרקטורון',                    // vehicle accidents
 ];
 
 // Fetch raw HTML from a URL
@@ -438,10 +467,30 @@ function parseTelegramHTML(html) {
   return messages;
 }
 
-// Check if message text describes a missile impact
+// Check if message text describes a missile/rocket impact (contextual analysis)
 function isImpactRelated(text) {
-  if (EXCLUDE_PATTERNS.some(p => text.includes(p))) return false;
-  return IMPACT_KEYWORDS.some(kw => text.includes(kw));
+  // Step 1: Always-exclude patterns (all-clear, drills) — never missile impacts
+  if (ALWAYS_EXCLUDE.some(p => text.includes(p))) return false;
+
+  // Step 2: Must contain at least one impact keyword to be a candidate
+  const hasImpactKeyword = IMPACT_KEYWORDS.some(kw => text.includes(kw));
+  if (!hasImpactKeyword) return false;
+
+  // Step 3: Context analysis — read the message to understand what it's about
+  const hasMissileContext = MISSILE_CONTEXT.some(kw => text.includes(kw));
+  const hasNonMissileContext = NON_MISSILE_CONTEXT.some(kw => text.includes(kw));
+
+  // If message has missile context → it's a real impact (even if MDA reports it alongside other info)
+  if (hasMissileContext) return true;
+
+  // If message has non-missile context but NO missile context → it's about something else
+  // (e.g., MDA reporting car accident injuries — "פצועים" keyword matched but context is accident)
+  if (hasNonMissileContext) return false;
+
+  // Step 4: Ambiguous — has impact keywords but no clear context either way.
+  // Impact keywords like נפילה/פגיעה/יירוט are strong enough on their own in Israeli
+  // news channels during conflict — include by default.
+  return true;
 }
 
 // Common Hebrew city abbreviations used in Telegram reports
