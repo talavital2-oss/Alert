@@ -423,34 +423,21 @@
   // Called when new alerts arrive — schedule impact fetching 2 min later
   function recordAlertTime(events) {
     if (!events || events.length === 0) return;
-    const now = Date.now();
-    for (const ev of events) {
-      lastAlertTimes.push(ev.maxTime || now);
-    }
-    // Keep only last 2 hours of alert times
-    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
-    lastAlertTimes = lastAlertTimes.filter(t => t > twoHoursAgo);
 
-    // Schedule impact fetch 2 minutes after this alert
-    if (!impactPollTimer) {
-      impactPollTimer = setTimeout(() => {
-        impactPollTimer = null;
-        fetchImpacts();
-        startImpactPolling();
-      }, 2 * 60 * 1000);
+    // Start impact polling immediately (every 10s)
+    if (!impactPollingInterval) {
+      fetchImpacts(); // immediate first fetch
+      impactPollingInterval = setInterval(fetchImpacts, 10000);
     }
-  }
 
-  function startImpactPolling() {
-    if (impactPollingInterval) return;
-    impactPollingInterval = setInterval(fetchImpacts, 30000); // every 30s
-    // Stop polling after 10 minutes
+    // Reset the stop timer — 20 min from last alert
+    if (impactPollingStop) clearTimeout(impactPollingStop);
     impactPollingStop = setTimeout(() => {
       if (impactPollingInterval) {
         clearInterval(impactPollingInterval);
         impactPollingInterval = null;
       }
-    }, 10 * 60 * 1000);
+    }, 20 * 60 * 1000);
   }
 
   async function fetchImpacts() {
@@ -462,22 +449,13 @@
 
       if (impacts.length === 0) return;
 
-      // Only show impacts whose timestamp correlates with a known alert
-      // (alertTime - 2min to alertTime + 30min)
-      const relevant = impacts.filter(imp => {
-        return lastAlertTimes.some(alertTime => {
-          const diff = imp.timeMs - alertTime;
-          return diff > -2 * 60 * 1000 && diff < 30 * 60 * 1000;
-        });
-      });
-
-      if (relevant.length === 0) return;
-
-      for (const impact of relevant) {
+      // Show all impacts the server returns — the server already does
+      // contextual filtering (missile-related only, no car accidents etc.)
+      for (const impact of impacts) {
         AlertMap.addImpact(impact);
       }
 
-      console.log(`[Impacts] ${relevant.length} impact locations from Telegram`);
+      console.log(`[Impacts] ${impacts.length} impact locations from Telegram`);
     } catch (e) {
       // Silently handle fetch errors
     }
