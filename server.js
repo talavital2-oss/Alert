@@ -335,7 +335,7 @@ function fetchOrefAlerts() {
 // ============================================================
 
 let telegramCache = { time: 0, impacts: [] };
-const TELEGRAM_CACHE_TTL = 30000; // 30-second cache
+const TELEGRAM_CACHE_TTL = 10000; // 10-second cache (matches poll interval during alerts)
 
 // Alert-triggered impact polling state
 let lastAlertDetectedAt = 0;           // timestamp of most recent alert detection
