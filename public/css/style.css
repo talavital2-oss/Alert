@@ -155,7 +155,7 @@ html, body {
   position: fixed;
   top: var(--status-height);
   left: 0;
-  right: var(--panel-width);
+  right: 0;
   bottom: 0;
   z-index: 1;
   background: var(--bg-dark);
@@ -512,27 +512,18 @@ html, body {
     --panel-width: 100%;
   }
 
-  #map, #map-gl {
-    right: 0;
-    bottom: 0;
-  }
-
   #alert-panel {
     top: auto;
     bottom: 0;
-    height: 40vh;
+    height: 45vh;
     width: 100%;
     border-left: none;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 16px 16px 0 0;
   }
 
   #alert-panel.panel-closed {
     transform: translateY(100%);
-  }
-
-  #alert-panel.panel-open ~ #map {
-    bottom: 40vh;
   }
 }
 

@@ -33,14 +33,6 @@
   panelToggle.addEventListener('click', () => {
     alertPanel.classList.toggle('panel-closed');
     alertPanel.classList.toggle('panel-open');
-
-    const mapEl = document.getElementById('map');
-    const mapGl = document.getElementById('map-gl');
-    const rightVal = alertPanel.classList.contains('panel-closed') ? '0' :
-      (window.innerWidth <= 768 ? '0' : 'var(--panel-width)');
-    mapEl.style.right = rightVal;
-    mapGl.style.right = rightVal;
-    setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
   });
 
   // ── Panel Tab Switching ──
@@ -76,15 +68,8 @@
     if (alertPanel.classList.contains('panel-closed')) {
       alertPanel.classList.remove('panel-closed');
       alertPanel.classList.add('panel-open');
-      const rightVal = window.innerWidth <= 768 ? '0' : 'var(--panel-width)';
-      document.getElementById('map').style.right = rightVal;
-      document.getElementById('map-gl').style.right = rightVal;
-      setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
     }
   }
-
-  // Set initial active menu item
-  menuItems.forEach(i => i.classList.toggle('active', i.dataset.section === 'alerts'));
 
   // ── Impact History ──
   async function loadImpactHistory() {
@@ -374,13 +359,7 @@
     onInit: handleInit
   });
 
-  // Handle window resize
-  window.addEventListener('resize', () => {
-    const rightVal = (window.innerWidth <= 768 || alertPanel.classList.contains('panel-closed'))
-      ? '0' : 'var(--panel-width)';
-    document.getElementById('map').style.right = rightVal;
-    document.getElementById('map-gl').style.right = rightVal;
-  });
+  // Map is always full-width (sidebar overlays on top with transparency)
 
   // ── Pre-Alert tracking (Pikud HaOref Category 14 — predicted areas) ──
   let currentPreAlertIds = new Set();
