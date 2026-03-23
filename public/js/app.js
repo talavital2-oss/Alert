@@ -565,6 +565,84 @@
 
   cityClearBtn.addEventListener('click', clearCitySelection);
 
+  // ── My Location + Shelters ──
+  const btnMyLocation = document.getElementById('btn-my-location');
+  const btnShowShelters = document.getElementById('btn-show-shelters');
+  let myLat = null, myLng = null;
+  let sheltersVisible = false;
+
+  function getMyLocation() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error('Geolocation not supported'));
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        err => reject(err),
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
+  }
+
+  btnMyLocation.addEventListener('click', async () => {
+    try {
+      btnMyLocation.style.opacity = '0.5';
+      const pos = await getMyLocation();
+      myLat = pos.lat;
+      myLng = pos.lng;
+      AlertMap.showMyLocation(myLat, myLng);
+      btnMyLocation.classList.add('active');
+      btnMyLocation.style.opacity = '';
+    } catch (e) {
+      btnMyLocation.style.opacity = '';
+      alert('לא ניתן לקבל מיקום. אנא אפשר שירותי מיקום.');
+    }
+  });
+
+  btnShowShelters.addEventListener('click', async () => {
+    if (sheltersVisible) {
+      AlertMap.clearShelters();
+      btnShowShelters.classList.remove('active');
+      sheltersVisible = false;
+      return;
+    }
+
+    // Need location first
+    if (!myLat || !myLng) {
+      try {
+        btnShowShelters.style.opacity = '0.5';
+        const pos = await getMyLocation();
+        myLat = pos.lat;
+        myLng = pos.lng;
+        AlertMap.showMyLocation(myLat, myLng);
+        btnMyLocation.classList.add('active');
+      } catch (e) {
+        btnShowShelters.style.opacity = '';
+        alert('לא ניתן לקבל מיקום. אנא אפשר שירותי מיקום ולחץ שוב.');
+        return;
+      }
+    }
+
+    try {
+      btnShowShelters.style.opacity = '0.5';
+      const res = await fetch(`/api/shelters/nearby?lat=${myLat}&lng=${myLng}&radius=2000`);
+      const data = await res.json();
+      const shelterList = data.shelters || [];
+
+      if (shelterList.length === 0) {
+        alert('לא נמצאו מקלטים באזורך (רדיוס 2 ק״מ)');
+        btnShowShelters.style.opacity = '';
+        return;
+      }
+
+      AlertMap.showShelters(shelterList);
+      btnShowShelters.classList.add('active');
+      sheltersVisible = true;
+      btnShowShelters.style.opacity = '';
+    } catch (e) {
+      btnShowShelters.style.opacity = '';
+      alert('שגיאה בטעינת מקלטים');
+    }
+  });
+
   // ── Map Search (Nominatim — streets, places, landmarks, POIs) ──
   const mapSearchInput = document.getElementById('map-search-input');
   const mapSearchClear = document.getElementById('map-search-clear');

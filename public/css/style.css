@@ -718,6 +718,90 @@ html, body {
 
 /* (Hamburger menu removed — replaced by panel tabs) */
 
+/* ===== Map Action Buttons ===== */
+#map-actions {
+  position: fixed;
+  bottom: 24px;
+  left: 16px;
+  z-index: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-action-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: rgba(20, 20, 20, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.map-action-btn:hover {
+  background: rgba(30, 30, 30, 0.85);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.map-action-btn.active {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #f59e0b;
+}
+
+/* My location marker */
+.my-location-marker {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #3b82f6;
+  border: 3px solid #fff;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.6), 0 0 24px rgba(59, 130, 246, 0.2);
+}
+
+.my-location-pulse {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  animation: location-pulse 2s infinite;
+}
+
+@keyframes location-pulse {
+  0% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.3); opacity: 0.2; }
+  100% { transform: scale(1); opacity: 0.6; }
+}
+
+/* Shelter markers */
+.shelter-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.shelter-marker.closest {
+  width: 16px;
+  height: 16px;
+  background: #22c55e;
+  border: 3px solid #fff;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+}
+
 /* ===== Map Search Overlay ===== */
 #map-search-overlay {
   position: fixed;

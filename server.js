@@ -10,6 +10,10 @@ const PORT = process.env.PORT || 3000;
 const cities = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'cities.json'), 'utf8'));
 console.log(`Loaded ${Object.keys(cities).length} cities`);
 
+// Load shelter data (14,982 shelters nationwide from GovMap + municipal sources)
+const shelters = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'shelters.json'), 'utf8'));
+console.log(`Loaded ${shelters.length} shelters`);
+
 // Alert state (for persistent server mode / SSE)
 let currentAlerts = [];
 let alertHistory = [];
@@ -19,6 +23,43 @@ let lastAlertJson = '';
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Nearby shelters API — returns shelters within radius of a point
+app.get('/api/shelters/nearby', (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+  const radius = Math.min(parseFloat(req.query.radius) || 1000, 5000); // max 5km
+
+  if (!lat || !lng || lat < 29 || lat > 34 || lng < 34 || lng > 36) {
+    return res.status(400).json({ error: 'Invalid coordinates' });
+  }
+
+  // Fast approximate distance filter (1 degree ≈ 111km)
+  const degRadius = radius / 111000;
+  const nearby = [];
+
+  for (const s of shelters) {
+    const dLat = s.lat - lat;
+    const dLng = s.lng - lng;
+    if (Math.abs(dLat) > degRadius || Math.abs(dLng) > degRadius * 1.5) continue;
+
+    // Haversine distance in meters
+    const R = 6371000;
+    const φ1 = lat * Math.PI / 180, φ2 = s.lat * Math.PI / 180;
+    const Δφ = dLat * Math.PI / 180;
+    const Δλ = dLng * Math.PI / 180;
+    const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+    const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    if (dist <= radius) {
+      nearby.push({ ...s, dist: Math.round(dist) });
+    }
+  }
+
+  // Sort by distance, limit to 50
+  nearby.sort((a, b) => a.dist - b.dist);
+  res.json({ shelters: nearby.slice(0, 50), total: nearby.length, radius });
+});
 
 // Serve city data to frontend
 app.get('/api/cities', (req, res) => {

@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="css/style.css?v=7">
+  <link rel="stylesheet" href="css/style.css?v=8">
 </head>
 <body>
   <!-- Status Bar -->
@@ -48,6 +48,22 @@
         </svg>
       </button>
     </div>
+  </div>
+
+  <!-- Map Action Buttons (bottom-left) -->
+  <div id="map-actions">
+    <button id="btn-my-location" class="map-action-btn" title="המיקום שלי">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+      </svg>
+    </button>
+    <button id="btn-show-shelters" class="map-action-btn" title="מקלטים קרובים">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 21h18M3 21V8l9-6 9 6v13"/>
+        <path d="M9 21v-6h6v6"/>
+      </svg>
+    </button>
   </div>
 
   <!-- Map Search Overlay -->
@@ -110,9 +126,9 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 
   <!-- App Modules -->
-  <script src="js/sounds.js?v=7"></script>
-  <script src="js/map.js?v=7"></script>
-  <script src="js/alerts.js?v=7"></script>
-  <script src="js/app.js?v=7"></script>
+  <script src="js/sounds.js?v=8"></script>
+  <script src="js/map.js?v=8"></script>
+  <script src="js/alerts.js?v=8"></script>
+  <script src="js/app.js?v=8"></script>
 </body>
 </html>

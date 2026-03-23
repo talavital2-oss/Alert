@@ -932,5 +932,81 @@ const AlertMap = (function () {
     if (searchPinGlLabel) { searchPinGlLabel.remove(); searchPinGlLabel = null; }
   }
 
-  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount, highlightCity, clearHighlight, showSearchPin, clearSearchPin };
+  // ── My Location ──
+  let myLocationMarker = null;
+  let myLocationPulse = null;
+  let myLocationGl = null;
+  let myLocationPulseGl = null;
+
+  function showMyLocation(lat, lng) {
+    clearMyLocation();
+    const pulseIcon = L.divIcon({ className: 'my-location-pulse', iconSize: [40, 40], iconAnchor: [20, 20] });
+    myLocationPulse = L.marker([lat, lng], { icon: pulseIcon, zIndexOffset: 900, interactive: false }).addTo(map);
+    const dotIcon = L.divIcon({ className: 'my-location-marker', iconSize: [16, 16], iconAnchor: [8, 8] });
+    myLocationMarker = L.marker([lat, lng], { icon: dotIcon, zIndexOffset: 1000 }).addTo(map);
+
+    if (useGL && glMap) {
+      const pEl = document.createElement('div'); pEl.className = 'my-location-pulse';
+      myLocationPulseGl = new maplibregl.Marker({ element: pEl }).setLngLat([lng, lat]).addTo(glMap);
+      const dEl = document.createElement('div'); dEl.className = 'my-location-marker';
+      myLocationGl = new maplibregl.Marker({ element: dEl }).setLngLat([lng, lat]).addTo(glMap);
+    }
+    panTo(lat, lng, 15);
+  }
+
+  function clearMyLocation() {
+    if (myLocationMarker) { map.removeLayer(myLocationMarker); myLocationMarker = null; }
+    if (myLocationPulse) { map.removeLayer(myLocationPulse); myLocationPulse = null; }
+    if (myLocationGl) { myLocationGl.remove(); myLocationGl = null; }
+    if (myLocationPulseGl) { myLocationPulseGl.remove(); myLocationPulseGl = null; }
+  }
+
+  // ── Shelter Markers ──
+  let shelterMarkers = [];
+  let shelterGlMarkers = [];
+
+  function showShelters(shelterList) {
+    clearShelters();
+    for (let i = 0; i < shelterList.length; i++) {
+      const s = shelterList[i];
+      const isClosest = i === 0;
+      const cls = isClosest ? 'shelter-marker closest' : 'shelter-marker';
+      const icon = L.divIcon({ className: cls, iconSize: isClosest ? [16, 16] : [12, 12], iconAnchor: isClosest ? [8, 8] : [6, 6] });
+      const marker = L.marker([s.lat, s.lng], { icon, zIndexOffset: isClosest ? 800 : 700 }).addTo(map);
+
+      const walkMin = Math.ceil(s.dist / 80); // ~80m/min walking
+      const typeStr = s.t || 'מקלט ציבורי';
+      const distStr = s.dist < 1000 ? `${s.dist} מ׳` : `${(s.dist / 1000).toFixed(1)} ק״מ`;
+      marker.bindPopup(`
+        <div style="direction:rtl;text-align:right;min-width:160px;">
+          <div style="font-size:14px;font-weight:700;margin-bottom:4px;">${isClosest ? '🟢 המקלט הקרוב ביותר' : '🟠 מקלט'}</div>
+          <div style="font-size:12px;color:#d1d5db;margin-bottom:2px;">${typeStr}</div>
+          ${s.a ? `<div style="font-size:12px;color:#9ca3af;">${s.a}</div>` : ''}
+          ${s.b ? `<div style="font-size:11px;color:#6b7280;">${s.b}</div>` : ''}
+          <div style="font-size:13px;font-weight:600;color:#f59e0b;margin-top:6px;">${distStr} · ${walkMin} דק׳ הליכה</div>
+          ${s.s ? `<div style="font-size:11px;color:#6b7280;">שטח: ${s.s} מ״ר</div>` : ''}
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=walking" target="_blank" style="display:inline-block;margin-top:6px;font-size:12px;color:#3b82f6;text-decoration:none;">🧭 נווט למקלט</a>
+        </div>
+      `, { className: 'alert-popup', maxWidth: 260 });
+
+      if (isClosest) marker.openPopup();
+      shelterMarkers.push(marker);
+
+      if (useGL && glMap) {
+        const el = document.createElement('div');
+        el.className = cls;
+        const glM = new maplibregl.Marker({ element: el }).setLngLat([s.lng, s.lat]).addTo(glMap);
+        shelterGlMarkers.push(glM);
+      }
+    }
+  }
+
+  function clearShelters() {
+    for (const m of shelterMarkers) map.removeLayer(m);
+    for (const m of shelterGlMarkers) m.remove();
+    shelterMarkers = [];
+    shelterGlMarkers = [];
+  }
+
+  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount, highlightCity, clearHighlight, showSearchPin, clearSearchPin, showMyLocation, clearMyLocation, showShelters, clearShelters };
 })();
