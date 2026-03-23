@@ -834,5 +834,57 @@ const AlertMap = (function () {
     return preAlertMarkers.size;
   }
 
-  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount };
+  // ── City Highlight (always visible, even when zoomed out) ──
+  let highlightMarker = null;
+  let highlightLabel = null;
+  let highlightGlMarker = null;
+  let highlightGlLabel = null;
+
+  function highlightCity(name, lat, lng) {
+    clearHighlight();
+
+    // Leaflet marker — large green dot
+    const icon = L.divIcon({
+      className: 'city-highlight-marker',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9]
+    });
+    highlightMarker = L.marker([lat, lng], { icon, zIndexOffset: 2000 }).addTo(map);
+
+    // Leaflet label — always visible city name
+    const labelIcon = L.divIcon({
+      className: 'city-highlight-label',
+      html: name,
+      iconAnchor: [-14, 12]
+    });
+    highlightLabel = L.marker([lat, lng], { icon: labelIcon, zIndexOffset: 2000 }).addTo(map);
+
+    // GL marker + label
+    if (useGL && glMap) {
+      const dotEl = document.createElement('div');
+      dotEl.className = 'city-highlight-marker';
+      highlightGlMarker = new maplibregl.Marker({ element: dotEl })
+        .setLngLat([lng, lat])
+        .addTo(glMap);
+
+      const labelEl = document.createElement('div');
+      labelEl.className = 'city-highlight-label';
+      labelEl.textContent = name;
+      highlightGlLabel = new maplibregl.Marker({ element: labelEl, anchor: 'left', offset: [14, 0] })
+        .setLngLat([lng, lat])
+        .addTo(glMap);
+    }
+
+    // Fly to city
+    panTo(lat, lng, 13);
+  }
+
+  function clearHighlight() {
+    if (highlightMarker) { map.removeLayer(highlightMarker); highlightMarker = null; }
+    if (highlightLabel) { map.removeLayer(highlightLabel); highlightLabel = null; }
+    if (highlightGlMarker) { highlightGlMarker.remove(); highlightGlMarker = null; }
+    if (highlightGlLabel) { highlightGlLabel.remove(); highlightGlLabel = null; }
+  }
+
+  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount, highlightCity, clearHighlight };
 })();

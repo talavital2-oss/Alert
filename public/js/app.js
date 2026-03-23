@@ -20,11 +20,18 @@
   const panelTabs = document.querySelectorAll('.panel-tab');
   const tabAlertCount = document.getElementById('tab-alert-count');
   const tabImpactCount = document.getElementById('tab-impact-count');
+  const citiesSection = document.getElementById('cities-section');
+  const citySearch = document.getElementById('city-search');
+  const cityClearBtn = document.getElementById('city-clear-btn');
+  const citySelected = document.getElementById('city-selected');
+  const cityResults = document.getElementById('city-results');
 
   let eventHistory = []; // array of event objects
   let knownEventIds = new Set(); // track event IDs to prevent duplicates
-  let activeSection = 'alerts'; // 'alerts' or 'impacts'
+  let activeSection = 'alerts'; // 'alerts' or 'impacts' or 'cities'
   let impactHistoryMarkers = []; // temporary markers shown when clicking impact cards
+  let allCities = []; // loaded from server
+  let selectedCity = null; // currently highlighted city
 
   // Initialize map
   AlertMap.init();
@@ -51,17 +58,24 @@
     // Clear any impact history markers from map
     clearImpactHistoryMarkers();
 
+    // Hide all sections first
+    alertList.classList.add('hidden');
+    impactList.classList.add('hidden');
+    citiesSection.classList.add('hidden');
+    noAlerts.style.display = 'none';
+    noImpacts.classList.add('hidden');
+
     if (section === 'alerts') {
       alertList.classList.remove('hidden');
-      impactList.classList.add('hidden');
-      noImpacts.classList.add('hidden');
       noAlerts.style.display = eventHistory.length === 0 ? '' : 'none';
       updateAlertCounts();
     } else if (section === 'impacts') {
-      alertList.classList.add('hidden');
-      noAlerts.style.display = 'none';
       impactList.classList.remove('hidden');
       loadImpactHistory();
+    } else if (section === 'cities') {
+      citiesSection.classList.remove('hidden');
+      if (allCities.length === 0) loadCities();
+      citySearch.focus();
     }
 
     // Open panel if closed
@@ -485,6 +499,93 @@
     onConnectionChange: setConnectionStatus,
     onInit: handleInit
   });
+
+  // ── City Search & Selection ──
+  async function loadCities() {
+    try {
+      const res = await fetch('/api/cities');
+      const data = await res.json();
+      // Convert object {name: {lat, lng, he, en, countdown}} to array
+      allCities = Object.entries(data).map(([name, c]) => ({
+        name,
+        he: c.he || name,
+        en: c.en || '',
+        lat: c.lat,
+        lng: c.lng,
+        countdown: c.countdown
+      }));
+      allCities.sort((a, b) => a.he.localeCompare(b.he, 'he'));
+      renderCityResults(''); // show all initially
+    } catch (e) {
+      cityResults.innerHTML = '<div style="text-align:center;padding:20px;color:var(--red-alert);">שגיאה בטעינת ערים</div>';
+    }
+  }
+
+  function renderCityResults(query) {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? allCities.filter(c =>
+          c.he.includes(q) || c.en.toLowerCase().includes(q) || c.name.includes(q)
+        )
+      : allCities;
+
+    // Limit to 100 results for performance
+    const shown = filtered.slice(0, 100);
+    const extra = filtered.length - shown.length;
+
+    cityResults.innerHTML = shown.map(c => `
+      <div class="city-result-item" data-city="${encodeURIComponent(c.name)}" data-lat="${c.lat}" data-lng="${c.lng}">
+        <div>
+          <div class="city-result-name">${c.he}</div>
+          ${c.en ? `<div class="city-result-en">${c.en}</div>` : ''}
+        </div>
+        ${c.countdown ? `<div class="city-result-countdown">${c.countdown}s</div>` : ''}
+      </div>
+    `).join('') + (extra > 0 ? `<div style="text-align:center;padding:8px;color:var(--text-dim);font-size:12px;">+${extra} ערים נוספות — חפש לסנן</div>` : '');
+
+    // Click handlers
+    cityResults.querySelectorAll('.city-result-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const name = decodeURIComponent(el.dataset.city);
+        const lat = parseFloat(el.dataset.lat);
+        const lng = parseFloat(el.dataset.lng);
+        const city = allCities.find(c => c.name === name);
+        selectCity(city || { name, he: name, en: '', lat, lng });
+      });
+    });
+  }
+
+  function selectCity(city) {
+    selectedCity = city;
+    citySelected.classList.remove('hidden');
+    citySelected.innerHTML = `
+      <span class="city-selected-name">📍 ${city.he}</span>
+      ${city.en ? `<span class="city-selected-en">${city.en}</span>` : ''}
+    `;
+    cityClearBtn.classList.remove('hidden');
+    citySearch.value = '';
+    renderCityResults('');
+
+    // Highlight on map
+    AlertMap.highlightCity(city.he, city.lat, city.lng);
+  }
+
+  function clearCitySelection() {
+    selectedCity = null;
+    citySelected.classList.add('hidden');
+    citySelected.innerHTML = '';
+    cityClearBtn.classList.add('hidden');
+    citySearch.value = '';
+    renderCityResults('');
+    AlertMap.clearHighlight();
+  }
+
+  // Wire up search input
+  citySearch.addEventListener('input', () => {
+    renderCityResults(citySearch.value);
+  });
+
+  cityClearBtn.addEventListener('click', clearCitySelection);
 
   console.log('Israel Alert Map initialized');
 })();
