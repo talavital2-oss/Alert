@@ -718,6 +718,189 @@ html, body {
 
 /* (Hamburger menu removed — replaced by panel tabs) */
 
+/* ===== Map Search Overlay ===== */
+#map-search-overlay {
+  position: fixed;
+  top: calc(var(--status-height) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 600;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+}
+
+.map-search-wrap {
+  position: relative;
+}
+
+.map-search-input {
+  width: 100%;
+  padding: 10px 38px 10px 14px;
+  background: rgba(20, 20, 20, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.map-search-input::placeholder {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.map-search-input:focus {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(20, 20, 20, 0.85);
+}
+
+.map-search-clear {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
+.map-search-clear:hover {
+  color: var(--text-primary);
+}
+
+.map-search-results {
+  margin-top: 4px;
+  background: rgba(20, 20, 20, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.map-search-results::-webkit-scrollbar {
+  width: 4px;
+}
+
+.map-search-results::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.map-search-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.map-search-item:last-child {
+  border-bottom: none;
+}
+
+.map-search-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.map-search-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  width: 20px;
+  text-align: center;
+}
+
+.map-search-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.map-search-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-search-detail {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: ltr;
+  text-align: right;
+}
+
+.map-search-type {
+  font-size: 10px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.map-search-loading {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* Search pin marker */
+.search-pin-marker {
+  width: 24px;
+  height: 24px;
+  border-radius: 50% 50% 50% 0;
+  background: #8b5cf6;
+  border: 3px solid #fff;
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.5);
+  transform: rotate(-45deg);
+}
+
+.search-pin-label {
+  background: rgba(139, 92, 246, 0.9) !important;
+  color: #fff !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 2px 8px !important;
+  border-radius: 6px !important;
+  border: none !important;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
+  white-space: nowrap !important;
+  max-width: 200px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+@media (max-width: 768px) {
+  #map-search-overlay {
+    width: calc(100vw - 16px);
+    left: 8px;
+    transform: none;
+  }
+}
+
 /* ===== City Search & Selection ===== */
 #cities-section {
   display: flex;

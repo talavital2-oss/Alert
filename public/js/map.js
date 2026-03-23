@@ -886,5 +886,51 @@ const AlertMap = (function () {
     if (highlightGlLabel) { highlightGlLabel.remove(); highlightGlLabel = null; }
   }
 
-  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount, highlightCity, clearHighlight };
+  // ── Search Pin (map search result) ──
+  let searchPinMarker = null;
+  let searchPinLabel = null;
+  let searchPinGl = null;
+  let searchPinGlLabel = null;
+
+  function showSearchPin(name, lat, lng, zoom) {
+    clearSearchPin();
+
+    const icon = L.divIcon({
+      className: 'search-pin-marker',
+      iconSize: [24, 24],
+      iconAnchor: [12, 24]
+    });
+    searchPinMarker = L.marker([lat, lng], { icon, zIndexOffset: 1500 }).addTo(map);
+
+    const labelIcon = L.divIcon({
+      className: 'search-pin-label',
+      html: name,
+      iconAnchor: [-16, 12]
+    });
+    searchPinLabel = L.marker([lat, lng], { icon: labelIcon, zIndexOffset: 1500 }).addTo(map);
+
+    if (useGL && glMap) {
+      const el = document.createElement('div');
+      el.className = 'search-pin-marker';
+      searchPinGl = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([lng, lat]).addTo(glMap);
+
+      const lbl = document.createElement('div');
+      lbl.className = 'search-pin-label';
+      lbl.textContent = name;
+      searchPinGlLabel = new maplibregl.Marker({ element: lbl, anchor: 'left', offset: [16, 0] })
+        .setLngLat([lng, lat]).addTo(glMap);
+    }
+
+    panTo(lat, lng, zoom || 16);
+  }
+
+  function clearSearchPin() {
+    if (searchPinMarker) { map.removeLayer(searchPinMarker); searchPinMarker = null; }
+    if (searchPinLabel) { map.removeLayer(searchPinLabel); searchPinLabel = null; }
+    if (searchPinGl) { searchPinGl.remove(); searchPinGl = null; }
+    if (searchPinGlLabel) { searchPinGlLabel.remove(); searchPinGlLabel = null; }
+  }
+
+  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount, highlightCity, clearHighlight, showSearchPin, clearSearchPin };
 })();

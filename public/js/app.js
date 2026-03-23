@@ -565,5 +565,132 @@
 
   cityClearBtn.addEventListener('click', clearCitySelection);
 
+  // ── Map Search (Nominatim — streets, places, landmarks, POIs) ──
+  const mapSearchInput = document.getElementById('map-search-input');
+  const mapSearchClear = document.getElementById('map-search-clear');
+  const mapSearchResults = document.getElementById('map-search-results');
+  let searchDebounce = null;
+
+  const TYPE_ICONS = {
+    city: '🏙️', town: '🏙️', village: '🏘️', hamlet: '🏘️',
+    road: '🛣️', street: '🛣️', residential: '🛣️', motorway: '🛣️',
+    building: '🏢', house: '🏠', apartments: '🏢',
+    school: '🏫', university: '🎓', college: '🎓',
+    hospital: '🏥', clinic: '🏥', pharmacy: '💊',
+    restaurant: '🍽️', cafe: '☕', fast_food: '🍔',
+    supermarket: '🛒', mall: '🛍️', shop: '🛍️',
+    park: '🌳', garden: '🌳', playground: '🎪',
+    bus_stop: '🚏', station: '🚉', railway: '🚉',
+    place_of_worship: '🕌', synagogue: '🕍', mosque: '🕌', church: '⛪',
+    monument: '🗿', memorial: '🗿', archaeological_site: '🏛️',
+    hotel: '🏨', tourism: '📍', attraction: '⭐',
+    fuel: '⛽', parking: '🅿️',
+    military: '🎖️', police: '👮',
+  };
+
+  function getIcon(type, category) {
+    if (TYPE_ICONS[type]) return TYPE_ICONS[type];
+    if (TYPE_ICONS[category]) return TYPE_ICONS[category];
+    if (category === 'highway' || category === 'road') return '🛣️';
+    if (category === 'building') return '🏢';
+    if (category === 'amenity') return '📍';
+    if (category === 'shop') return '🛍️';
+    if (category === 'tourism') return '📍';
+    return '📍';
+  }
+
+  function getZoomForType(type) {
+    if (['city', 'town'].includes(type)) return 14;
+    if (['village', 'hamlet', 'suburb', 'neighbourhood'].includes(type)) return 15;
+    if (['road', 'street', 'residential', 'motorway'].includes(type)) return 17;
+    return 17;
+  }
+
+  async function searchMap(query) {
+    if (!query || query.trim().length < 2) {
+      mapSearchResults.classList.add('hidden');
+      return;
+    }
+
+    mapSearchResults.classList.remove('hidden');
+    mapSearchResults.innerHTML = '<div class="map-search-loading">מחפש...</div>';
+
+    try {
+      const q = encodeURIComponent(query.trim());
+      const url = `https://nominatim.openstreetmap.org/search?q=${q}&countrycodes=il&format=json&addressdetails=1&limit=8&accept-language=he`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'IsraelAlertMap/1.0' } });
+      const results = await res.json();
+
+      if (results.length === 0) {
+        mapSearchResults.innerHTML = '<div class="map-search-loading">לא נמצאו תוצאות</div>';
+        return;
+      }
+
+      mapSearchResults.innerHTML = results.map((r, i) => {
+        const icon = getIcon(r.type, r.class);
+        const name = r.display_name.split(',')[0];
+        const detail = r.display_name.split(',').slice(1, 3).join(',').trim();
+        const typeLabel = r.type.replace(/_/g, ' ');
+        return `
+          <div class="map-search-item" data-idx="${i}" data-lat="${r.lat}" data-lng="${r.lon}" data-name="${name.replace(/"/g, '&quot;')}" data-type="${r.type}">
+            <span class="map-search-icon">${icon}</span>
+            <div class="map-search-info">
+              <div class="map-search-name">${name}</div>
+              ${detail ? `<div class="map-search-detail">${detail}</div>` : ''}
+            </div>
+            <span class="map-search-type">${typeLabel}</span>
+          </div>
+        `;
+      }).join('');
+
+      mapSearchResults.querySelectorAll('.map-search-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const lat = parseFloat(el.dataset.lat);
+          const lng = parseFloat(el.dataset.lng);
+          const name = el.dataset.name;
+          const zoom = getZoomForType(el.dataset.type);
+          AlertMap.showSearchPin(name, lat, lng, zoom);
+          mapSearchResults.classList.add('hidden');
+          mapSearchClear.classList.remove('hidden');
+        });
+      });
+    } catch (e) {
+      mapSearchResults.innerHTML = '<div class="map-search-loading">שגיאה בחיפוש</div>';
+    }
+  }
+
+  mapSearchInput.addEventListener('input', () => {
+    clearTimeout(searchDebounce);
+    const val = mapSearchInput.value;
+    if (val.trim().length < 2) {
+      mapSearchResults.classList.add('hidden');
+      mapSearchClear.classList.toggle('hidden', !val);
+      return;
+    }
+    mapSearchClear.classList.remove('hidden');
+    searchDebounce = setTimeout(() => searchMap(val), 400);
+  });
+
+  mapSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      mapSearchInput.blur();
+      mapSearchResults.classList.add('hidden');
+    }
+  });
+
+  mapSearchClear.addEventListener('click', () => {
+    mapSearchInput.value = '';
+    mapSearchResults.classList.add('hidden');
+    mapSearchClear.classList.add('hidden');
+    AlertMap.clearSearchPin();
+  });
+
+  // Close results when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#map-search-overlay')) {
+      mapSearchResults.classList.add('hidden');
+    }
+  });
+
   console.log('Israel Alert Map initialized');
 })();
