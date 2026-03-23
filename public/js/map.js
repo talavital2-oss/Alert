@@ -7,6 +7,7 @@ maplibregl.setRTLTextPlugin(
 );
 
 const AlertMap = (function () {
+  let mapClickCallback = null; // one-time click handler for manual location
   let map = null;           // Leaflet map
   let glMap = null;          // MapLibre GL map
   let useGL = false;         // true when showing MapLibre GL
@@ -403,6 +404,15 @@ const AlertMap = (function () {
     setTileStyle(savedStyle || 'carto-dark');
 
     createStyleControl();
+
+    // Map click handler for manual location setting
+    map.on('click', (e) => {
+      if (mapClickCallback) {
+        mapClickCallback(e.latlng.lat, e.latlng.lng);
+        mapClickCallback = null;
+        map.getContainer().style.cursor = '';
+      }
+    });
 
     return map;
   }
@@ -1018,5 +1028,10 @@ const AlertMap = (function () {
     shelterGlMarkers = [];
   }
 
-  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount, highlightCity, clearHighlight, showSearchPin, clearSearchPin, showMyLocation, clearMyLocation, showShelters, clearShelters };
+  function onMapClick(cb) {
+    mapClickCallback = cb;
+    if (map) map.getContainer().style.cursor = 'crosshair';
+  }
+
+  return { init, addAlert, removeMarker, clearAll, fitToAlerts, panTo, getActiveCount, showHistoryEvent, clearHistoryMarkers, alertLabels, alertLabelsEn, addImpact, removeImpact, clearImpacts, addPreAlert, removePreAlert, clearPreAlerts, getPreAlertCount, highlightCity, clearHighlight, showSearchPin, clearSearchPin, showMyLocation, clearMyLocation, showShelters, clearShelters, onMapClick };
 })();

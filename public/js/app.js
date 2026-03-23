@@ -603,9 +603,19 @@
       AlertMap.showMyLocation(myLat, myLng);
       btnMyLocation.classList.add('active');
       btnMyLocation.style.opacity = '';
+      console.log('[Location] Got position:', myLat, myLng);
     } catch (e) {
       btnMyLocation.style.opacity = '';
-      alert('לא ניתן לקבל מיקום. אנא אפשר שירותי מיקום.');
+      console.error('[Location] Error:', e.message || e);
+      // Fallback: let user click on map to set location
+      alert('לא ניתן לקבל מיקום אוטומטי. לחץ על המפה כדי לבחור את מיקומך.');
+      AlertMap.onMapClick((lat, lng) => {
+        myLat = lat;
+        myLng = lng;
+        AlertMap.showMyLocation(myLat, myLng);
+        btnMyLocation.classList.add('active');
+        console.log('[Location] Set manually:', myLat, myLng);
+      });
     }
   });
 
