@@ -15,19 +15,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="css/style.css?v=4">
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
   <!-- Status Bar -->
   <div id="status-bar">
     <div class="status-left">
-      <button id="menu-toggle" class="icon-btn" title="תפריט">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="3" y1="6" x2="21" y2="6"/>
-          <line x1="3" y1="12" x2="21" y2="12"/>
-          <line x1="3" y1="18" x2="21" y2="18"/>
-        </svg>
-      </button>
       <span class="logo">🛡️ התרעות ישראל</span>
       <span id="connection-status" class="status-dot disconnected">
         <span class="dot"></span>
@@ -57,41 +50,23 @@
     </div>
   </div>
 
-  <!-- Hamburger Menu Overlay -->
-  <div id="menu-overlay" class="menu-overlay hidden"></div>
-  <div id="menu-drawer" class="menu-drawer menu-closed">
-    <div class="menu-header">
-      <span class="menu-title">🛡️ תפריט</span>
-      <button id="menu-close" class="icon-btn">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="18" y1="6" x2="6" y2="18"/>
-          <line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
-    </div>
-    <div class="menu-items">
-      <button class="menu-item" data-section="alerts">
-        <span class="menu-item-icon">🔴</span>
-        <span class="menu-item-label">התרעות אחרונות</span>
-        <span class="menu-item-desc">Red alerts in real-time</span>
-      </button>
-      <button class="menu-item" data-section="impacts">
-        <span class="menu-item-icon">🔵</span>
-        <span class="menu-item-label">היסטוריית פגיעות</span>
-        <span class="menu-item-desc">Impact history — last 12 hours</span>
-      </button>
-    </div>
-  </div>
-
   <!-- Map -->
   <div id="map"></div>
   <div id="map-gl"></div>
 
   <!-- Side Panel (dynamic content — alerts or impacts) -->
   <div id="alert-panel" class="panel-open">
-    <div class="panel-header">
-      <h2 id="panel-title">התרעות אחרונות</h2>
-      <span id="panel-alert-count">0 התרעות</span>
+    <div class="panel-tabs">
+      <button class="panel-tab active" data-section="alerts">
+        <span class="tab-dot tab-dot-red"></span>
+        <span class="tab-label">התרעות</span>
+        <span id="tab-alert-count" class="tab-count">0</span>
+      </button>
+      <button class="panel-tab" data-section="impacts">
+        <span class="tab-dot tab-dot-blue"></span>
+        <span class="tab-label">פגיעות</span>
+        <span id="tab-impact-count" class="tab-count">0</span>
+      </button>
     </div>
     <div id="alert-list"></div>
     <div id="impact-list" class="hidden"></div>
@@ -103,7 +78,7 @@
     <div id="no-impacts" class="no-alerts hidden">
       <div class="no-alerts-icon" style="background:rgba(59,130,246,0.1);color:#3b82f6;">📍</div>
       <p>אין דיווחי פגיעות</p>
-      <p class="no-alerts-sub">No impact reports in the last 12 hours</p>
+      <p class="no-alerts-sub">No impact reports in the last 24 hours</p>
     </div>
   </div>
 
@@ -114,9 +89,9 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 
   <!-- App Modules -->
-  <script src="js/sounds.js?v=4"></script>
-  <script src="js/map.js?v=4"></script>
-  <script src="js/alerts.js?v=4"></script>
-  <script src="js/app.js?v=4"></script>
+  <script src="js/sounds.js?v=5"></script>
+  <script src="js/map.js?v=5"></script>
+  <script src="js/alerts.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
 </body>
 </html>

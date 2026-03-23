@@ -363,10 +363,39 @@ const IMPACT_KEYWORDS = [
   'פגע', 'פגעה'
 ];
 
-// Messages containing these are NOT impacts
-const EXCLUDE_PATTERNS = [
-  'תרגיל', 'בדיקה', 'דיווח שגוי', 'אין נפילות', 'דיווח כוזב',
-  'שקט', 'הותר לפרסום'
+// ALWAYS exclude — these are never missile impacts regardless of other keywords
+const ALWAYS_EXCLUDE = [
+  // False alarms / drills
+  'תרגיל', 'בדיקה', 'דיווח שגוי', 'אין נפילות', 'דיווח כוזב', 'שקט',
+  // "All clear" / shelter exit announcements
+  'ניתן לצאת ממרחבים מוגנים',
+  'ניתן לצאת ממרחבים',
+  'ניתנה הוראת פתיחה',
+  'ניתן לחזור לשגרה',
+];
+
+// Missile/rocket context — if a message has impact keywords AND these, it's a real impact
+const MISSILE_CONTEXT = [
+  'רקטה', 'רקטות', 'טיל', 'טילים', 'טיל בליסטי', 'טילים בליסטיים',
+  'כטב"מ', 'כטמ"ב', 'כלי טיס', 'מל"ט', 'כטבם', // drones
+  'יירוט', 'יירוטים', 'כיפת ברזל', 'חץ',          // interception / Iron Dome / Arrow
+  'שברי', 'רסיס', 'רסיסים', 'אמל"ח', 'אמל״ח', 'אמלח', // shrapnel / ordnance
+  'צבע אדום', 'אזעקה', 'אזעקות', 'התרעה',          // alert context
+  'חיזבאללה', 'חמאס', 'עזה', 'לבנון', 'תימן', 'חות\'ים', 'חות׳ים', 'איראן', // conflict parties
+  'התקפה', 'מתקפה', 'ירי רקטי', 'ירי טילים', 'מטח', 'מטחים', // attack terms
+  'חיל האוויר', 'צה"ל', 'צה״ל', 'פיקוד העורף',     // military
+  'שטח פתוח', 'שטחים פתוחים',                        // open area (common impact location)
+  'מבנה', 'מבנים', 'גג', 'חצר',                      // building hit
+  'מקלט', 'ממ"ד', 'ממ״ד', 'מרחב מוגן',              // shelter (people injured heading to shelter = missile context)
+];
+
+// Non-missile context — if a message has impact keywords but ONLY these contexts, it's NOT a missile impact
+const NON_MISSILE_CONTEXT = [
+  'תאונת דרכים', 'תאונת עבודה', 'תאונה',            // accidents
+  'פלילי', 'דקירה', 'רצח', 'שוד', 'פיגוע דריסה',   // crime
+  'שריפה בדירה', 'שריפה במבנה', 'שריפת יער',        // non-missile fires
+  'הצפה', 'שיטפון', 'רעידת אדמה',                    // natural events
+  'התהפכות רכב', 'תאונת טרקטורון',                    // vehicle accidents
 ];
 
 // Fetch raw HTML from a URL
@@ -438,10 +467,30 @@ function parseTelegramHTML(html) {
   return messages;
 }
 
-// Check if message text describes a missile impact
+// Check if message text describes a missile/rocket impact (contextual analysis)
 function isImpactRelated(text) {
-  if (EXCLUDE_PATTERNS.some(p => text.includes(p))) return false;
-  return IMPACT_KEYWORDS.some(kw => text.includes(kw));
+  // Step 1: Always-exclude patterns (all-clear, drills) — never missile impacts
+  if (ALWAYS_EXCLUDE.some(p => text.includes(p))) return false;
+
+  // Step 2: Must contain at least one impact keyword to be a candidate
+  const hasImpactKeyword = IMPACT_KEYWORDS.some(kw => text.includes(kw));
+  if (!hasImpactKeyword) return false;
+
+  // Step 3: Context analysis — read the message to understand what it's about
+  const hasMissileContext = MISSILE_CONTEXT.some(kw => text.includes(kw));
+  const hasNonMissileContext = NON_MISSILE_CONTEXT.some(kw => text.includes(kw));
+
+  // If message has missile context → it's a real impact (even if MDA reports it alongside other info)
+  if (hasMissileContext) return true;
+
+  // If message has non-missile context but NO missile context → it's about something else
+  // (e.g., MDA reporting car accident injuries — "פצועים" keyword matched but context is accident)
+  if (hasNonMissileContext) return false;
+
+  // Step 4: Ambiguous — has impact keywords but no clear context either way.
+  // Impact keywords like נפילה/פגיעה/יירוט are strong enough on their own in Israeli
+  // news channels during conflict — include by default.
+  return true;
 }
 
 // Common Hebrew city abbreviations used in Telegram reports
@@ -999,12 +1048,12 @@ app.get('/api/impacts', async (req, res) => {
   }
 });
 
-// Impact History — last 12 hours of Telegram impact reports
+// Impact History — last 24 hours of Telegram impact reports
 // Uses the same Telegram scraping, but extends the time window
 app.get('/api/impacts/history', async (req, res) => {
   try {
     const now = Date.now();
-    const twelveHoursAgo = now - 12 * 60 * 60 * 1000;
+    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
 
     // Fetch all channels in parallel
     const channelResults = await Promise.allSettled(
@@ -1017,9 +1066,9 @@ app.get('/api/impacts/history', async (req, res) => {
       .filter(r => r.status === 'fulfilled')
       .flatMap(r => r.value);
 
-    // Only messages from last 12 hours that are impact-related
+    // Only messages from last 24 hours that are impact-related
     const impactMessages = messages.filter(m =>
-      m.timeMs > twelveHoursAgo && isImpactRelated(m.text)
+      m.timeMs > twentyFourHoursAgo && isImpactRelated(m.text)
     );
 
     // Extract locations and deduplicate
@@ -1080,10 +1129,63 @@ app.get('/api/impacts/history', async (req, res) => {
 // Pre-Alerts — Pikud HaOref Category 14 "Preliminary Guidance"
 // Fetched via rocketil.live API (severity: "warn")
 // Sent 3-5 minutes before actual alerts to predicted areas
+// Cities grouped by event_id → displayed as region polygons
 // ============================================================
 
+// Compute convex hull of 2D points using Graham scan
+// Input: [[lat, lng], ...] — Output: [[lat, lng], ...] in order (closed polygon)
+function convexHull(points) {
+  if (points.length <= 2) {
+    // For 1-2 points, create a small diamond/buffer around them
+    if (points.length === 1) {
+      const [lat, lng] = points[0];
+      const d = 0.02; // ~2km buffer
+      return [[lat + d, lng], [lat, lng + d], [lat - d, lng], [lat, lng - d]];
+    }
+    // 2 points — create a thin polygon around the line
+    const [a, b] = points;
+    const dx = b[1] - a[1], dy = b[0] - a[0];
+    const len = Math.sqrt(dx * dx + dy * dy) || 0.01;
+    const nx = -dy / len * 0.015, ny = dx / len * 0.015;
+    return [[a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny]];
+  }
+
+  const pts = points.map((p, i) => ({ x: p[1], y: p[0], i })); // lng=x, lat=y
+  pts.sort((a, b) => a.x - b.x || a.y - b.y);
+
+  function cross(O, A, B) {
+    return (A.x - O.x) * (B.y - O.y) - (A.y - O.y) * (B.x - O.x);
+  }
+
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  const hull = lower.concat(upper);
+
+  // Add a small buffer around the hull to make it visible for tight clusters
+  const cx = hull.reduce((s, p) => s + p.x, 0) / hull.length;
+  const cy = hull.reduce((s, p) => s + p.y, 0) / hull.length;
+  const buffered = hull.map(p => {
+    const dx = p.x - cx, dy = p.y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+    const scale = Math.max(1.15, 0.015 / dist); // at least 15% expansion or ~1.5km
+    return [cy + (p.y - cy) * scale, cx + (p.x - cx) * scale]; // [lat, lng]
+  });
+  return buffered;
+}
+
 let preAlertCache = { time: 0, preAlerts: [] };
-const PRE_ALERT_CACHE_TTL = 15000; // 15-second cache (time-sensitive)
+const PRE_ALERT_CACHE_TTL = 5000; // 5-second cache (show immediately)
 const PRE_ALERT_EXPIRY_MS = 10 * 60 * 1000; // pre-alerts expire after 10 minutes
 
 app.get('/api/pre-alerts', async (req, res) => {
@@ -1107,7 +1209,8 @@ app.get('/api/pre-alerts', async (req, res) => {
     }
 
     // Filter for pre-alerts (severity: "warn") that haven't expired
-    const preAlerts = [];
+    // Group by event_id to create region polygons instead of individual circles
+    const eventGroups = new Map(); // event_id -> { cities: [...], timeMs, title, expiresAt }
     const seenRegions = new Set();
 
     for (const alert of alertsArr) {
@@ -1116,7 +1219,6 @@ app.get('/api/pre-alerts', async (req, res) => {
       const alertTime = new Date(alert.timestamp || alert.created_at).getTime();
       if (now - alertTime > PRE_ALERT_EXPIRY_MS) continue; // expired
 
-      // Parse payload
       let payload = {};
       try {
         payload = typeof alert.payload_json === 'string'
@@ -1126,35 +1228,52 @@ app.get('/api/pre-alerts', async (req, res) => {
 
       const regionName = alert.region_name || payload.oref_city || '';
       if (!regionName) continue;
-
-      // Deduplicate by region
       if (seenRegions.has(regionName)) continue;
       seenRegions.add(regionName);
 
-      // Get coordinates — try payload first, then city lookup
       let lat = payload.lat || null;
       let lng = payload.lng || null;
-
       if (!lat || !lng) {
         const cityData = cities[regionName];
-        if (cityData) {
-          lat = cityData.lat;
-          lng = cityData.lng;
-        }
+        if (cityData) { lat = cityData.lat; lng = cityData.lng; }
       }
+      if (!lat || !lng) continue;
 
-      if (!lat || !lng) continue; // can't map it
+      const eventId = payload.event_id || 'unknown';
+      if (!eventGroups.has(eventId)) {
+        eventGroups.set(eventId, {
+          cities: [],
+          timeMs: alertTime,
+          title: payload.oref_title || 'צפי להתרעות באזורך',
+          expiresAt: alertTime + PRE_ALERT_EXPIRY_MS
+        });
+      }
+      eventGroups.get(eventId).cities.push({ name: regionName, lat, lng });
+    }
+
+    // Build pre-alert regions (grouped by event)
+    const preAlerts = [];
+    for (const [eventId, group] of eventGroups) {
+      const points = group.cities.map(c => [c.lat, c.lng]);
+      // Compute convex hull for polygon display
+      const hull = convexHull(points);
+      // Center point for popup
+      const centerLat = points.reduce((s, p) => s + p[0], 0) / points.length;
+      const centerLng = points.reduce((s, p) => s + p[1], 0) / points.length;
 
       preAlerts.push({
-        id: `pre-${alert.id || alert.region_id}`,
-        region: regionName,
-        lat,
-        lng,
-        timeMs: alertTime,
-        timestamp: new Date(alertTime).toISOString(),
-        expiresAt: alertTime + PRE_ALERT_EXPIRY_MS,
-        title: payload.oref_title || 'צפי להתרעות באזורך',
-        eventId: payload.event_id || null,
+        id: `pre-event-${eventId}`,
+        eventId,
+        region: group.cities.map(c => c.name).slice(0, 5).join(', ') + (group.cities.length > 5 ? ` +${group.cities.length - 5} נוספים` : ''),
+        cityCount: group.cities.length,
+        cities: group.cities.map(c => c.name),
+        polygon: hull, // [[lat, lng], ...] for map polygon
+        lat: centerLat,
+        lng: centerLng,
+        timeMs: group.timeMs,
+        timestamp: new Date(group.timeMs).toISOString(),
+        expiresAt: group.expiresAt,
+        title: group.title,
         severity: 'warn'
       });
     }

@@ -6,8 +6,8 @@
   const connectionStatus = document.getElementById('connection-status');
   const statusText = connectionStatus.querySelector('.status-text');
   const alertCountBadge = document.getElementById('alert-count');
-  const panelAlertCount = document.getElementById('panel-alert-count');
-  const panelTitle = document.getElementById('panel-title');
+  // panel-alert-count removed — counts now in tab badges
+  // panel-title removed — section indicated by active tab
   const alertList = document.getElementById('alert-list');
   const impactList = document.getElementById('impact-list');
   const noAlerts = document.getElementById('no-alerts');
@@ -17,11 +17,9 @@
   const soundIconOn = document.getElementById('sound-icon-on');
   const panelToggle = document.getElementById('panel-toggle');
   const alertPanel = document.getElementById('alert-panel');
-  const menuToggle = document.getElementById('menu-toggle');
-  const menuOverlay = document.getElementById('menu-overlay');
-  const menuDrawer = document.getElementById('menu-drawer');
-  const menuClose = document.getElementById('menu-close');
-  const menuItems = document.querySelectorAll('.menu-item');
+  const panelTabs = document.querySelectorAll('.panel-tab');
+  const tabAlertCount = document.getElementById('tab-alert-count');
+  const tabImpactCount = document.getElementById('tab-impact-count');
 
   let eventHistory = []; // array of event objects
   let knownEventIds = new Set(); // track event IDs to prevent duplicates
@@ -35,55 +33,31 @@
   panelToggle.addEventListener('click', () => {
     alertPanel.classList.toggle('panel-closed');
     alertPanel.classList.toggle('panel-open');
-
-    const mapEl = document.getElementById('map');
-    const mapGl = document.getElementById('map-gl');
-    const rightVal = alertPanel.classList.contains('panel-closed') ? '0' :
-      (window.innerWidth <= 768 ? '0' : 'var(--panel-width)');
-    mapEl.style.right = rightVal;
-    mapGl.style.right = rightVal;
-    setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
   });
 
-  // ── Hamburger Menu ──
-  function openMenu() {
-    menuDrawer.classList.remove('menu-closed');
-    menuOverlay.classList.remove('hidden');
-  }
-  function closeMenu() {
-    menuDrawer.classList.add('menu-closed');
-    menuOverlay.classList.add('hidden');
-  }
-  menuToggle.addEventListener('click', openMenu);
-  menuClose.addEventListener('click', closeMenu);
-  menuOverlay.addEventListener('click', closeMenu);
-
-  // Menu section switching
-  menuItems.forEach(item => {
-    item.addEventListener('click', () => {
-      const section = item.dataset.section;
+  // ── Panel Tab Switching ──
+  panelTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const section = tab.dataset.section;
       switchSection(section);
-      closeMenu();
     });
   });
 
   function switchSection(section) {
     activeSection = section;
-    // Update menu active state
-    menuItems.forEach(i => i.classList.toggle('active', i.dataset.section === section));
+    // Update tab active state
+    panelTabs.forEach(t => t.classList.toggle('active', t.dataset.section === section));
 
     // Clear any impact history markers from map
     clearImpactHistoryMarkers();
 
     if (section === 'alerts') {
-      panelTitle.textContent = 'התרעות אחרונות';
       alertList.classList.remove('hidden');
       impactList.classList.add('hidden');
       noImpacts.classList.add('hidden');
       noAlerts.style.display = eventHistory.length === 0 ? '' : 'none';
       updateAlertCounts();
     } else if (section === 'impacts') {
-      panelTitle.textContent = 'היסטוריית פגיעות';
       alertList.classList.add('hidden');
       noAlerts.style.display = 'none';
       impactList.classList.remove('hidden');
@@ -94,15 +68,8 @@
     if (alertPanel.classList.contains('panel-closed')) {
       alertPanel.classList.remove('panel-closed');
       alertPanel.classList.add('panel-open');
-      const rightVal = window.innerWidth <= 768 ? '0' : 'var(--panel-width)';
-      document.getElementById('map').style.right = rightVal;
-      document.getElementById('map-gl').style.right = rightVal;
-      setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
     }
   }
-
-  // Set initial active menu item
-  menuItems.forEach(i => i.classList.toggle('active', i.dataset.section === 'alerts'));
 
   // ── Impact History ──
   async function loadImpactHistory() {
@@ -116,14 +83,13 @@
       const impacts = data.impacts || [];
 
       impactList.innerHTML = '';
+      tabImpactCount.textContent = impacts.length;
       if (impacts.length === 0) {
         noImpacts.classList.remove('hidden');
-        panelAlertCount.textContent = '0 פגיעות';
         return;
       }
 
       noImpacts.classList.add('hidden');
-      panelAlertCount.textContent = `${impacts.length} פגיעות`;
 
       for (const impact of impacts) {
         const card = createImpactCard(impact);
@@ -230,7 +196,7 @@
     }
     // Count total cities across all events
     const totalCities = eventHistory.reduce((sum, ev) => sum + ev.cityCount, 0);
-    panelAlertCount.textContent = `${totalCities} התרעות`;
+    tabAlertCount.textContent = totalCities;
   }
 
   // Create event card for panel (grouped - like the real app)
@@ -393,13 +359,7 @@
     onInit: handleInit
   });
 
-  // Handle window resize
-  window.addEventListener('resize', () => {
-    const rightVal = (window.innerWidth <= 768 || alertPanel.classList.contains('panel-closed'))
-      ? '0' : 'var(--panel-width)';
-    document.getElementById('map').style.right = rightVal;
-    document.getElementById('map-gl').style.right = rightVal;
-  });
+  // Map is always full-width (sidebar overlays on top with transparency)
 
   // ── Pre-Alert tracking (Pikud HaOref Category 14 — predicted areas) ──
   let currentPreAlertIds = new Set();
@@ -434,8 +394,8 @@
     }
   }
 
-  // Poll pre-alerts every 15 seconds (they're time-critical)
-  preAlertPollInterval = setInterval(fetchPreAlerts, 15000);
+  // Poll pre-alerts every 5 seconds (show immediately when available)
+  preAlertPollInterval = setInterval(fetchPreAlerts, 5000);
   fetchPreAlerts(); // initial fetch
 
   // ── Impact tracking (Telegram missile impact reports) ──
